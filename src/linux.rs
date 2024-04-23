@@ -1,18 +1,5 @@
 use std::path::PathBuf;
 
-/// Initialize a new log instance
-pub fn new_log(level: super::LogLevel) {
-    simple_logger::SimpleLogger::new().init().unwrap();
-    let filter = match level {
-        crate::LogLevel::Debug => log::LevelFilter::Debug,
-        crate::LogLevel::Info => log::LevelFilter::Info,
-        crate::LogLevel::Warning => log::LevelFilter::Warn,
-        crate::LogLevel::Error => log::LevelFilter::Error,
-        crate::LogLevel::Trace => log::LevelFilter::Trace,
-    };
-    log::set_max_level(filter);
-}
-
 /// The configuration for constructing a Service.
 pub struct ServiceConfig {
     /// The display name of the service for the user.
@@ -66,6 +53,12 @@ impl Service {
     /// Construct a new self
     pub fn new(name: String) -> Self {
         Self { name }
+    }
+
+    /// Initialize a new log instance
+    pub fn new_log(&self, level: super::LogLevel) {
+        simple_logger::SimpleLogger::new().init().unwrap();
+        log::set_max_level(level.level_filter());
     }
 
     /// The systemd path for linux

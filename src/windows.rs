@@ -15,7 +15,7 @@ use winapi::um::winsvc::SERVICE_RUNNING;
 use winapi::um::winsvc::SERVICE_START_PENDING;
 
 /// Converts a utf8 string into a utf-16 string for windows
-pub fn get_utf16(value: &str) -> Vec<u16> {
+fn get_utf16(value: &str) -> Vec<u16> {
     std::ffi::OsStr::new(value)
         .encode_wide()
         .chain(std::iter::once(0))
@@ -162,6 +162,11 @@ impl Service {
         Self { name }
     }
 
+    /// Initialize a new log instance
+    pub fn new_log(&self, level: super::LogLevel) {
+        eventlog::init(&format!("{} Log", self.name), level.level()).unwrap();
+    }
+
     /// Does the service already exist?
     pub fn exists(&self) -> bool {
         let service_manager = ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS)
@@ -258,6 +263,7 @@ impl Service {
 
     /// Delete the service
     pub fn delete(&mut self) -> Result<(), ()> {
+        eventlog::deregister(&format!("{} Log", self.name)).unwrap();
         let service_manager = ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS); //TODO REMOVE RIGHTS NOT REQUIRED
         if let Some(service_manager) = service_manager {
             let service = service_manager
@@ -280,6 +286,7 @@ impl Service {
 
     /// Create the service
     pub fn create(&mut self, config: ServiceConfig) -> Result<(), ()> {
+        eventlog::register(&format!("{} Log", self.name)).unwrap();
         let service_manager = ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS); //TODO REMOVE RIGHTS NOT REQUIRED
         if let Some(service_manager) = service_manager {
             let service = unsafe {
