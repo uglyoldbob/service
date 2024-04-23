@@ -255,7 +255,6 @@ impl Service {
         }
     }
 
-    #[cfg(not(feature = "async"))]
     /// Delete the service
     pub fn delete(&mut self) -> Result<(), ()> {
         let service_manager = ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS); //TODO REMOVE RIGHTS NOT REQUIRED
@@ -274,22 +273,10 @@ impl Service {
 
     #[cfg(feature = "async")]
     /// Delete the service
-    pub async fn delete(&mut self) -> Result<(), ()> {
-        let service_manager = ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS); //TODO REMOVE RIGHTS NOT REQUIRED
-        if let Some(service_manager) = service_manager {
-            let service = service_manager
-                .open_service(&self.name, winapi::um::winsvc::SERVICE_ALL_ACCESS)
-                .unwrap();
-            if unsafe { winapi::um::winsvc::DeleteService(service.get_handle()) } == 0 {
-                return Err(());
-            }
-            Ok(())
-        } else {
-            Err(())
-        }
+    pub async fn delete_async(&mut self) -> Result<(), ()> {
+        self.delete()
     }
 
-    #[cfg(not(feature = "async"))]
     /// Create the service
     pub fn create(&mut self, config: ServiceConfig) -> Result<(), ()> {
         let service_manager = ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS); //TODO REMOVE RIGHTS NOT REQUIRED
@@ -337,47 +324,7 @@ impl Service {
 
     #[cfg(feature = "async")]
     /// Create the service
-    pub async fn create(&mut self, config: ServiceConfig) -> Result<(), ()> {
-        let service_manager = ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS); //TODO REMOVE RIGHTS NOT REQUIRED
-        if let Some(service_manager) = service_manager {
-            let service = unsafe {
-                winapi::um::winsvc::CreateServiceW(
-                    service_manager.get_handle(),
-                    get_utf16(self.name.as_str()).as_ptr(),
-                    get_utf16(config.display.as_str()).as_ptr(),
-                    config.desired_access,
-                    config.service_type,
-                    config.start_type,
-                    config.error_control,
-                    get_utf16(config.binary.as_os_str().to_str().unwrap()).as_ptr(),
-                    get_optional_utf16(config.load_order_group.as_deref()),
-                    std::ptr::null_mut(),
-                    get_optional_utf16(config.dependencies.as_deref()),
-                    get_optional_utf16(config.username.as_deref()),
-                    get_optional_utf16(config.user_password.as_deref()),
-                )
-            };
-            if service.is_null() {
-                return Err(());
-            }
-            let mut description = get_utf16(config.description.as_str());
-
-            let mut sd = winapi::um::winsvc::SERVICE_DESCRIPTIONW {
-                lpDescription: description.as_mut_ptr(),
-            };
-
-            let p_sd = &mut sd as *mut _ as *mut winapi::ctypes::c_void;
-            unsafe {
-                winapi::um::winsvc::ChangeServiceConfig2W(
-                    service,
-                    winapi::um::winsvc::SERVICE_CONFIG_DESCRIPTION,
-                    p_sd,
-                )
-            };
-            unsafe { winapi::um::winsvc::CloseServiceHandle(service) };
-            Ok(())
-        } else {
-            Err(())
-        }
+    pub async fn create_async(&mut self, config: ServiceConfig) -> Result<(), ()> {
+        self.create(config)
     }
 }

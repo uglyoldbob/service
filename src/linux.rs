@@ -95,7 +95,6 @@ impl Service {
         }
     }
 
-    #[cfg(not(feature = "async"))]
     /// Delete the service
     pub fn delete(&mut self) {
         let pb = self.systemd_path().join(format!("{}.service", self.name));
@@ -105,7 +104,7 @@ impl Service {
 
     #[cfg(feature = "async")]
     /// Delete the service
-    pub async fn delete(&mut self) {
+    pub async fn delete_async(&mut self) {
         let pb = self.systemd_path().join(format!("{}.service", self.name));
         println!("Deleting {}", pb.display());
         tokio::fs::remove_file(pb).await.unwrap();
@@ -145,7 +144,6 @@ WantedBy=multi-user.target
         con
     }
 
-    #[cfg(not(feature = "async"))]
     /// Create the service
     pub async fn create(&mut self, config: ServiceConfig) {
         use std::io::Write;
@@ -160,7 +158,7 @@ WantedBy=multi-user.target
 
     #[cfg(feature = "async")]
     /// Create the service
-    pub async fn create(&mut self, config: ServiceConfig) {
+    pub async fn create_async(&mut self, config: ServiceConfig) {
         use tokio::io::AsyncWriteExt;
 
         let con = self.build_systemd_file(config);
