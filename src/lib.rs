@@ -1,14 +1,15 @@
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
-}
+//! Contains code for establishing a service
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+cfg_if::cfg_if! {
+    if #[cfg(windows)] {
+        mod windows;
+        pub use self::windows::ServiceConfig as ServiceConfig;
+    } else if #[cfg(target_os = "macos")] {
+        todo!();
+    } else if #[cfg(target_os = "linux")] {
+        mod linux;
+        pub use self::linux::ServiceConfig as ServiceConfig;
+    } else {
+        todo!();
     }
 }
