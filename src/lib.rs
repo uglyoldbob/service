@@ -1,5 +1,7 @@
 //! Contains code for establishing a service
 
+pub use log;
+
 /// The various levels of log, increasing in severity
 pub enum LogLevel {
     /// Trace
