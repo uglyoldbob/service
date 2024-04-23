@@ -13,7 +13,7 @@ pub struct ServiceConfig {
     /// The path to the configuration data for the service
     config_path: PathBuf,
     /// The username that the service should run as
-    username: String,
+    username: Option<String>,
 }
 
 impl ServiceConfig {
@@ -30,7 +30,7 @@ impl ServiceConfig {
         description: String,
         binary: PathBuf,
         config_path: PathBuf,
-        username: String,
+        username: Option<String>,
     ) -> Self {
         Self {
             display,
@@ -123,29 +123,27 @@ impl Service {
 
     fn build_systemd_file(&self, config: ServiceConfig) -> String {
         let mut con = String::new();
+        con.push_str("[Unit]\n");
+        con.push_str(&format!("Description={}\n", config.description));
+        con.push_str("[Service]\n");
+        if let Some(user) = config.username {
+            con.push_str(&format!("User={}\n", user));
+        }
         con.push_str(&format!(
-            "[Unit]
-Description={4}
-
-[Service]
-User={2}
-WorkingDirectory={0}
-ExecStart={3} --name={1}
-
-[Install]
-WantedBy=multi-user.target
-",
-            config.config_path.display(),
-            config.shortname,
-            config.username,
-            config.binary.display(),
-            config.description,
+            "WorkingDirectory={}\n",
+            config.config_path.display()
         ));
+        con.push_str(&format!(
+            "ExecStart={} --name={}\n",
+            config.binary.display(),
+            config.shortname
+        ));
+        con.push_str("\n[Install]\nWantedBy=multi-user.target\n");
         con
     }
 
     /// Create the service
-    pub async fn create(&mut self, config: ServiceConfig) {
+    pub fn create(&mut self, config: ServiceConfig) {
         use std::io::Write;
         let con = self.build_systemd_file(config);
         let pb = self.systemd_path().join(format!("{}.service", self.name));

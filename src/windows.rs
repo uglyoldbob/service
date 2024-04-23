@@ -126,8 +126,8 @@ impl ServiceConfig {
         description: String,
         binary: PathBuf,
         config_path: PathBuf,
-        username: String,
-        user_password: String,
+        username: Option<String>,
+        user_password: Option<String>,
     ) -> Self {
         Self {
             display,
@@ -135,8 +135,8 @@ impl ServiceConfig {
             description,
             binary,
             config_path,
-            username: Some(username),
-            user_password: Some(user_password),
+            username: username,
+            user_password: user_password,
             desired_access: winapi::um::winsvc::SERVICE_ALL_ACCESS,
             service_type: winapi::um::winnt::SERVICE_WIN32_OWN_PROCESS,
             start_type: winapi::um::winnt::SERVICE_AUTO_START,
@@ -246,6 +246,7 @@ impl Service {
             }
 
             if service_status.dwCurrentState != SERVICE_RUNNING {
+                println!("Failed to start service {}", service_status.dwCurrentState);
                 Err(())
             } else {
                 Ok(())
