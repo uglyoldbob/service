@@ -7,11 +7,15 @@ edition = "2021"
 
 [dependencies]
 cfg-if = "1.0.0"
+log = "0.4.21"
 
 [dependencies.tokio]
 version = "1.36.0"
 features = ["full"]
 optional = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+syslog = "6.1.1"
 
 [target.'cfg(windows)'.dependencies]
 winapi = {version = "0.3.9", features = ["winsvc"]}
