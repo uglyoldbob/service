@@ -95,11 +95,20 @@ impl Service {
         }
     }
 
+    #[cfg(not(feature = "async"))]
+    /// Delete the service
+    pub fn delete(&mut self) {
+        let pb = self.systemd_path().join(format!("{}.service", self.name));
+        println!("Deleting {}", pb.display());
+        std::fs::remove_file(pb).unwrap();
+    }
+
+    #[cfg(feature = "async")]
     /// Delete the service
     pub async fn delete(&mut self) {
         let pb = self.systemd_path().join(format!("{}.service", self.name));
         println!("Deleting {}", pb.display());
-        std::fs::remove_file(pb).unwrap();
+        tokio::fs::remove_file(pb).await.unwrap();
     }
 
     /// Reload system services if required
@@ -113,10 +122,7 @@ impl Service {
         }
     }
 
-    /// Create the service
-    pub async fn create(&mut self, config: ServiceConfig) {
-        use tokio::io::AsyncWriteExt;
-
+    fn build_systemd_file(&self, config: ServiceConfig) -> String {
         let mut con = String::new();
         con.push_str(&format!(
             "[Unit]
@@ -136,6 +142,28 @@ WantedBy=multi-user.target
             config.binary.display(),
             config.description,
         ));
+        con
+    }
+
+    #[cfg(not(feature = "async"))]
+    /// Create the service
+    pub async fn create(&mut self, config: ServiceConfig) {
+        use std::io::Write;
+        let con = self.build_systemd_file(config);
+        let pb = self.systemd_path().join(format!("{}.service", self.name));
+        println!("Saving service file as {}", pb.display());
+        let mut fpw = std::fs::File::create(pb).unwrap();
+        fpw.write_all(con.as_bytes())
+            .expect("Failed to write service file");
+        self.reload();
+    }
+
+    #[cfg(feature = "async")]
+    /// Create the service
+    pub async fn create(&mut self, config: ServiceConfig) {
+        use tokio::io::AsyncWriteExt;
+
+        let con = self.build_systemd_file(config);
         let pb = self.systemd_path().join(format!("{}.service", self.name));
         println!("Saving service file as {}", pb.display());
         let mut fpw = tokio::fs::File::create(pb).await.unwrap();
