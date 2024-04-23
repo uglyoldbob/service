@@ -2,14 +2,7 @@ use std::path::PathBuf;
 
 /// Initialize a new log instance
 pub fn new_log(level: super::LogLevel) {
-    let formatter = syslog::Formatter3164 {
-        facility: syslog::Facility::LOG_USER,
-        hostname: None,
-        process: std::env::current_exe().unwrap().display().to_string(),
-        pid: std::process::id(),
-    };
-    let a = syslog::unix(formatter).expect("could not connect to syslog");
-    log::set_boxed_logger(Box::new(syslog::BasicLogger::new(a))).unwrap();
+    simple_logger::SimpleLogger::new().init().unwrap();
     let filter = match level {
         crate::LogLevel::Debug => log::LevelFilter::Debug,
         crate::LogLevel::Info => log::LevelFilter::Info,
