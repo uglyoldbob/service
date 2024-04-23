@@ -1,12 +1,18 @@
 //! The windows specific code for service handling
 
+use std::path::PathBuf;
+
 use std::os::windows::ffi::OsStrExt;
 
 use winapi::shared::minwindef::DWORD;
 use winapi::um::winsvc::CloseServiceHandle;
 use winapi::um::winsvc::OpenSCManagerW;
 use winapi::um::winsvc::OpenServiceW;
+use winapi::um::winsvc::QueryServiceStatus;
+use winapi::um::winsvc::StartServiceW;
 use winapi::um::winsvc::SC_HANDLE;
+use winapi::um::winsvc::SERVICE_RUNNING;
+use winapi::um::winsvc::SERVICE_START_PENDING;
 
 /// Converts a utf8 string into a utf-16 string for windows
 pub fn get_utf16(value: &str) -> Vec<u16> {
@@ -79,9 +85,6 @@ impl ServiceController {
     }
 }
 
-#[cfg(target_os = "windows")]
-use winapi::shared::minwindef::DWORD;
-
 /// The configuration for constructing a Service
 pub struct ServiceConfig {
     /// The display name of the service for the user.
@@ -95,19 +98,16 @@ pub struct ServiceConfig {
     /// The path to the configuration data for the service
     config_path: PathBuf,
     /// The username that the service should run as
-    username: String,
+    username: Option<String>,
     /// The password for the user that the service should run as
-    user_password: String,
+    user_password: Option<String>,
     pub desired_access: DWORD,
     pub service_type: DWORD,
     pub start_type: DWORD,
     pub error_control: DWORD,
     pub tag_id: DWORD,
-    pub load_order_group: String,
-    pub dependencies: String,
-    pub account_name: String,
-    pub password: String,
-    pub service_status: winapi::um::winsvc::SERVICE_STATUS,
+    pub load_order_group: Option<String>,
+    pub dependencies: Option<String>,
     pub status_handle: winapi::um::winsvc::SERVICE_STATUS_HANDLE,
     pub controls_accepted: DWORD,
 }
@@ -127,6 +127,7 @@ impl ServiceConfig {
         binary: PathBuf,
         config_path: PathBuf,
         username: String,
+        user_password: String,
     ) -> Self {
         Self {
             display,
@@ -134,25 +135,15 @@ impl ServiceConfig {
             description,
             binary,
             config_path,
-            username,
+            username: Some(username),
+            user_password: Some(user_password),
             desired_access: winapi::um::winsvc::SERVICE_ALL_ACCESS,
             service_type: winapi::um::winnt::SERVICE_WIN32_OWN_PROCESS,
             start_type: winapi::um::winnt::SERVICE_AUTO_START,
             error_control: winapi::um::winnt::SERVICE_ERROR_NORMAL,
             tag_id: 0,
-            load_order_group: "".to_string(),
-            dependencies: "".to_string(),
-            account_name: "".to_string(),
-            password: "".to_string(),
-            service_status: winapi::um::winsvc::SERVICE_STATUS {
-                dwServiceType: winapi::um::winnt::SERVICE_WIN32_OWN_PROCESS,
-                dwCurrentState: winapi::um::winsvc::SERVICE_STOPPED,
-                dwControlsAccepted: 0,
-                dwWin32ExitCode: 0,
-                dwServiceSpecificExitCode: 0,
-                dwCheckPoint: 0,
-                dwWaitHint: 0,
-            },
+            load_order_group: None,
+            dependencies: None,
             status_handle: std::ptr::null_mut(),
             controls_accepted: winapi::um::winsvc::SERVICE_ACCEPT_STOP,
         }
@@ -173,9 +164,8 @@ impl Service {
 
     /// Does the service already exist?
     pub fn exists(&self) -> bool {
-        let service_manager =
-            windows::ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS)
-                .unwrap_or_else(|| panic!("Unable to get service controller")); //TODO REMOVE RIGHTS NOT REQUIRED
+        let service_manager = ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS)
+            .unwrap_or_else(|| panic!("Unable to get service controller")); //TODO REMOVE RIGHTS NOT REQUIRED
         let service =
             service_manager.open_service(&self.name, winapi::um::winsvc::SERVICE_ALL_ACCESS);
         service.is_some()
@@ -183,8 +173,7 @@ impl Service {
 
     /// Stop the service
     pub fn stop(&mut self) -> Result<(), ()> {
-        let service_manager =
-            windows::ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS); //TODO REMOVE RIGHTS NOT REQUIRED
+        let service_manager = ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS); //TODO REMOVE RIGHTS NOT REQUIRED
         if let Some(service_manager) = service_manager {
             let service = service_manager
                 .open_service(&self.name, winapi::um::winsvc::SERVICE_ALL_ACCESS)
@@ -232,8 +221,7 @@ impl Service {
 
     /// Start the service
     pub fn start(&mut self) -> Result<(), ()> {
-        let service_manager =
-            windows::ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS); //TODO REMOVE RIGHTS NOT REQUIRED
+        let service_manager = ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS); //TODO REMOVE RIGHTS NOT REQUIRED
         if let Some(service_manager) = service_manager {
             let service = service_manager
                 .open_service(&self.name, winapi::um::winsvc::SERVICE_ALL_ACCESS)
@@ -248,32 +236,20 @@ impl Service {
                     dwCheckPoint: 0,
                     dwWaitHint: 0,
                 };
-            if unsafe {
-                winapi::um::winsvc::ControlService(
-                    service.get_handle(),
-                    winapi::um::winsvc::SERVICE_CONTROL_START,
-                    &mut service_status,
-                )
-            } != 0
-            {
-                while unsafe {
-                    winapi::um::winsvc::QueryServiceStatus(
-                        service.get_handle(),
-                        &mut service_status,
-                    )
-                } != 0
-                {
-                    if service_status.dwCurrentState != winapi::um::winsvc::SERVICE_START_PENDING {
+            if unsafe { StartServiceW(service.handle, 0, std::ptr::null_mut()) } != 0 {
+                while unsafe { QueryServiceStatus(service.handle, &mut service_status) } != 0 {
+                    if service_status.dwCurrentState != SERVICE_START_PENDING {
                         break;
                     }
                     std::thread::sleep(std::time::Duration::from_millis(250));
                 }
             }
 
-            if unsafe { winapi::um::winsvc::DeleteService(service.get_handle()) } == 0 {
-                return Err(());
+            if service_status.dwCurrentState != SERVICE_RUNNING {
+                Err(())
+            } else {
+                Ok(())
             }
-            Ok(())
         } else {
             Err(())
         }
@@ -281,8 +257,7 @@ impl Service {
 
     /// Delete the service
     pub async fn delete(&mut self) -> Result<(), ()> {
-        let service_manager =
-            windows::ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS); //TODO REMOVE RIGHTS NOT REQUIRED
+        let service_manager = ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS); //TODO REMOVE RIGHTS NOT REQUIRED
         if let Some(service_manager) = service_manager {
             let service = service_manager
                 .open_service(&self.name, winapi::um::winsvc::SERVICE_ALL_ACCESS)
@@ -298,8 +273,7 @@ impl Service {
 
     /// Create the service
     pub async fn create(&mut self, config: ServiceConfig) -> Result<(), ()> {
-        let service_manager =
-            windows::ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS); //TODO REMOVE RIGHTS NOT REQUIRED
+        let service_manager = ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS); //TODO REMOVE RIGHTS NOT REQUIRED
         if let Some(service_manager) = service_manager {
             let service = unsafe {
                 winapi::um::winsvc::CreateServiceW(
@@ -310,12 +284,12 @@ impl Service {
                     config.service_type,
                     config.start_type,
                     config.error_control,
-                    get_optional_utf16(config.binary.as_deref().unwrap()),
-                    get_optional_utf16(config.load_order_group.as_deref().unwrap()),
+                    get_utf16(config.binary.as_os_str().to_str().unwrap()).as_ptr(),
+                    get_optional_utf16(config.load_order_group.as_deref()),
                     std::ptr::null_mut(),
-                    get_optional_utf16(config.dependencies.as_deref().unwrap()),
-                    get_utf16(config.username.to_str().unwrap()).as_ptr(),
-                    get_optional_utf16(config.user_password.as_deref().unwrap()),
+                    get_optional_utf16(config.dependencies.as_deref()),
+                    get_optional_utf16(config.username.as_deref()),
+                    get_optional_utf16(config.user_password.as_deref()),
                 )
             };
             if service.is_null() {
