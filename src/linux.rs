@@ -8,10 +8,10 @@ pub struct ServiceConfig {
     description: String,
     /// The path to the service binary
     binary: PathBuf,
-    /// The path to the configuration data for the service
-    config_path: PathBuf,
     /// The username that the service should run as
     username: Option<String>,
+    /// The path to the configuration data for the service
+    pub config_path: PathBuf,
 }
 
 impl ServiceConfig {
@@ -27,14 +27,13 @@ impl ServiceConfig {
         arguments: Vec<String>,
         description: String,
         binary: PathBuf,
-        config_path: PathBuf,
         username: Option<String>,
     ) -> Self {
         Self {
             arguments,
             description,
             binary,
-            config_path,
+            config_path: PathBuf::new(),
             username,
         }
     }
@@ -99,10 +98,10 @@ impl Service {
     }
 
     /// Delete the service
-    pub fn delete(&mut self) {
+    pub fn delete(&mut self) -> Result<(), ()> {
         let pb = self.systemd_path().join(format!("{}.service", self.name));
         println!("Deleting {}", pb.display());
-        std::fs::remove_file(pb).unwrap();
+        std::fs::remove_file(pb).map_err(|_| ())
     }
 
     #[cfg(feature = "async")]
@@ -146,15 +145,16 @@ impl Service {
     }
 
     /// Create the service
-    pub fn create(&mut self, config: ServiceConfig) {
+    pub fn create(&mut self, config: ServiceConfig) -> Result<(), ()> {
         use std::io::Write;
         let con = self.build_systemd_file(config);
         let pb = self.systemd_path().join(format!("{}.service", self.name));
         println!("Saving service file as {}", pb.display());
-        let mut fpw = std::fs::File::create(pb).unwrap();
+        let mut fpw = std::fs::File::create(pb).map_err(|_| ())?;
         fpw.write_all(con.as_bytes())
             .expect("Failed to write service file");
         self.reload();
+        Ok(())
     }
 
     #[cfg(feature = "async")]

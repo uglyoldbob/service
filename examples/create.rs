@@ -8,17 +8,21 @@ fn main() {
     exe.pop();
     let exe = exe.join("service");
 
-    let service_config = service::ServiceConfig::new(
-        #[cfg(target_family = "windows")]
-        "Example service".into(),
+    let mut service_config = service::ServiceConfig::new(
         vec!["example-arg1".to_string(), "arg2".to_string()],
         "The Example service".into(),
         exe,
-        std::path::PathBuf::from("./"),
-        None,
-        #[cfg(target_family = "windows")]
         None,
     );
-    service.create(service_config);
+    #[cfg(target_os = "linux")]
+    {
+        service_config.config_path = std::path::PathBuf::from("./");
+    }
+    #[cfg(target_family = "windows")]
+    {
+        service_config.display = "Example service".into();
+        service_config.user_password = None;
+    }
+    service.create(service_config).unwrap();
     service.start().unwrap();
 }

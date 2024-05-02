@@ -4,5 +4,5 @@ fn main() {
         panic!("Service does not exist");
     }
     service.stop().unwrap();
-    service.delete();
+    service.delete().unwrap();
 }

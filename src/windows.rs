@@ -87,20 +87,18 @@ impl ServiceController {
 
 /// The configuration for constructing a Service
 pub struct ServiceConfig {
-    /// The display name of the service for the user.
-    display: String,
-    /// The short name of the service
-    shortname: String,
+    /// The arguments for the service
+    arguments: Vec<String>,
     /// The description of the service as presented to the user
     description: String,
     /// The path to the service binary
     binary: PathBuf,
-    /// The path to the configuration data for the service
-    config_path: PathBuf,
     /// The username that the service should run as
     username: Option<String>,
+    /// The display name of the service for the user.
+    pub display: String,
     /// The password for the user that the service should run as
-    user_password: Option<String>,
+    pub user_password: Option<String>,
     pub desired_access: DWORD,
     pub service_type: DWORD,
     pub start_type: DWORD,
@@ -115,28 +113,26 @@ pub struct ServiceConfig {
 impl ServiceConfig {
     /// Build a new service config with reasonable defaults.
     /// # Arguments
-    /// * display - The display name of the service
+    /// * arguments - The list of arguments for the service
     /// * description - The description of the service
     /// * binary - The path to the binary that runs the service
     /// * config_path - The configuration path for the service
     /// * username - The username the service runs as
+    /// * display - The display name of the service
+    /// * user_password - The password for the user to run the service as
     pub fn new(
-        display: String,
-        shortname: String,
+        arguments: Vec<String>,
         description: String,
         binary: PathBuf,
-        config_path: PathBuf,
         username: Option<String>,
-        user_password: Option<String>,
     ) -> Self {
         Self {
-            display,
-            shortname,
+            arguments,
             description,
             binary,
-            config_path,
             username: username,
-            user_password: user_password,
+            display: String::new(),
+            user_password: None,
             desired_access: winapi::um::winsvc::SERVICE_ALL_ACCESS,
             service_type: winapi::um::winnt::SERVICE_WIN32_OWN_PROCESS,
             start_type: winapi::um::winnt::SERVICE_AUTO_START,
@@ -288,6 +284,13 @@ impl Service {
     pub fn create(&mut self, config: ServiceConfig) -> Result<(), ()> {
         eventlog::register(&format!("{} Log", self.name)).unwrap();
         let service_manager = ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS); //TODO REMOVE RIGHTS NOT REQUIRED
+        let exe = config.binary.as_os_str().to_str().unwrap();
+        let args = config.arguments.join(" ");
+        let exe_with_args = if config.arguments.is_empty() {
+            exe.to_string()
+        } else {
+            format!("{} {}", exe, args)
+        };
         if let Some(service_manager) = service_manager {
             let service = unsafe {
                 winapi::um::winsvc::CreateServiceW(
@@ -298,7 +301,7 @@ impl Service {
                     config.service_type,
                     config.start_type,
                     config.error_control,
-                    get_utf16(config.binary.as_os_str().to_str().unwrap()).as_ptr(),
+                    get_utf16(&exe_with_args).as_ptr(),
                     get_optional_utf16(config.load_order_group.as_deref()),
                     std::ptr::null_mut(),
                     get_optional_utf16(config.dependencies.as_deref()),
