@@ -9,8 +9,9 @@ fn main() {
     let exe = exe.join("service");
 
     let service_config = service::ServiceConfig::new(
+        #[cfg(target_family = "windows")]
         "Example service".into(),
-        "example-service".into(),
+        vec!["example-arg1".to_string(), "arg2".to_string()],
         "The Example service".into(),
         exe,
         std::path::PathBuf::from("./"),

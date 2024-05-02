@@ -2,10 +2,8 @@ use std::path::PathBuf;
 
 /// The configuration for constructing a Service.
 pub struct ServiceConfig {
-    /// The display name of the service for the user.
-    display: String,
-    /// The short name of the service
-    shortname: String,
+    /// The arguments for the service
+    arguments: Vec<String>,
     /// The description of the service as presented to the user
     description: String,
     /// The path to the service binary
@@ -20,21 +18,20 @@ impl ServiceConfig {
     /// Build a new service config with reasonable defaults.
     /// # Arguments
     /// * display - The display name of the service
+    /// * arguments - The list of arguments to provide to the service
     /// * description - The description of the service
     /// * binary - The path to the binary that runs the service
     /// * config_path - The configuration path for the service
     /// * username - The username the service runs as
     pub fn new(
-        display: String,
-        shortname: String,
+        arguments: Vec<String>,
         description: String,
         binary: PathBuf,
         config_path: PathBuf,
         username: Option<String>,
     ) -> Self {
         Self {
-            display,
-            shortname,
+            arguments,
             description,
             binary,
             config_path,
@@ -140,9 +137,9 @@ impl Service {
             config.config_path.display()
         ));
         con.push_str(&format!(
-            "ExecStart={} --name={}\n",
+            "ExecStart={} {}\n",
             config.binary.display(),
-            config.shortname
+            config.arguments.join(" ")
         ));
         con.push_str("\n[Install]\nWantedBy=multi-user.target\n");
         con
