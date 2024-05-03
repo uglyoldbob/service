@@ -3,6 +3,6 @@ fn main() {
     if !service.exists() {
         panic!("Service does not exist");
     }
-    service.stop().unwrap();
+    let _e = service.stop();
     service.delete().unwrap();
 }

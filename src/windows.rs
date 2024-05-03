@@ -259,7 +259,7 @@ impl Service {
 
     /// Delete the service
     pub fn delete(&mut self) -> Result<(), ()> {
-        eventlog::deregister(&format!("{} Log", self.name)).unwrap();
+        let _e = eventlog::deregister(&format!("{} Log", self.name));
         let service_manager = ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS); //TODO REMOVE RIGHTS NOT REQUIRED
         if let Some(service_manager) = service_manager {
             let service = service_manager
