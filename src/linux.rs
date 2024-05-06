@@ -106,7 +106,7 @@ impl Service {
 
     #[cfg(feature = "async")]
     /// Delete the service
-    pub async fn delete_async(&mut self) {
+    pub async fn delete_async(&mut self) -> Result<(), ()> {
         let pb = self.systemd_path().join(format!("{}.service", self.name));
         println!("Deleting {}", pb.display());
         tokio::fs::remove_file(pb).await.map_err(|_| ())
