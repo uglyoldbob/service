@@ -75,7 +75,7 @@ impl Service {
             .arg("stop")
             .arg(&self.name)
             .output()
-            .unwrap();
+            .map_err(|_| ())?;
         if !o.status.success() {
             Err(())
         } else {
@@ -89,7 +89,7 @@ impl Service {
             .arg("start")
             .arg(&self.name)
             .output()
-            .unwrap();
+            .map_err(|_| ())?;
         if !o.status.success() {
             Err(())
         } else {
@@ -109,17 +109,19 @@ impl Service {
     pub async fn delete_async(&mut self) {
         let pb = self.systemd_path().join(format!("{}.service", self.name));
         println!("Deleting {}", pb.display());
-        tokio::fs::remove_file(pb).await.unwrap();
+        tokio::fs::remove_file(pb).await.map_err(|_| ())
     }
 
     /// Reload system services if required
-    pub fn reload(&mut self) {
+    fn reload(&mut self) -> Result<(), ()> {
         let o = std::process::Command::new("systemctl")
             .arg("daemon-reload")
             .output()
-            .unwrap();
+            .map_err(|_| ())?;
         if !o.status.success() {
-            panic!("Failed to reload systemctl");
+            Err(())
+        } else {
+            Ok(())
         }
     }
 
@@ -153,8 +155,7 @@ impl Service {
         let mut fpw = std::fs::File::create(pb).map_err(|_| ())?;
         fpw.write_all(con.as_bytes())
             .expect("Failed to write service file");
-        self.reload();
-        Ok(())
+        self.reload()
     }
 
     #[cfg(feature = "async")]
@@ -169,6 +170,6 @@ impl Service {
         fpw.write_all(con.as_bytes())
             .await
             .expect("Failed to write service file");
-        self.reload();
+        self.reload()
     }
 }
