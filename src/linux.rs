@@ -153,23 +153,20 @@ impl Service {
         let pb = self.systemd_path().join(format!("{}.service", self.name));
         println!("Saving service file as {}", pb.display());
         let mut fpw = std::fs::File::create(pb).map_err(|_| ())?;
-        fpw.write_all(con.as_bytes())
-            .expect("Failed to write service file");
+        fpw.write_all(con.as_bytes()).map_err(|_| ())?;
         self.reload()
     }
 
     #[cfg(feature = "async")]
     /// Create the service
-    pub async fn create_async(&mut self, config: ServiceConfig) {
+    pub async fn create_async(&mut self, config: ServiceConfig) -> Result<(), ()> {
         use tokio::io::AsyncWriteExt;
 
         let con = self.build_systemd_file(config);
         let pb = self.systemd_path().join(format!("{}.service", self.name));
         println!("Saving service file as {}", pb.display());
-        let mut fpw = tokio::fs::File::create(pb).await.unwrap();
-        fpw.write_all(con.as_bytes())
-            .await
-            .expect("Failed to write service file");
+        let mut fpw = tokio::fs::File::create(pb).await.map_err(|_| ())?;
+        fpw.write_all(con.as_bytes()).await.map_err(|_| ())?;
         self.reload()
     }
 }
