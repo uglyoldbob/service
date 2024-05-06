@@ -310,6 +310,9 @@ impl Service {
                 )
             };
             if service.is_null() {
+                let err = unsafe { winapi::um::errhandlingapi::GetLastError()
+                };
+                println!("The error is {}", err);
                 return Err(());
             }
             let mut description = get_utf16(config.description.as_str());
