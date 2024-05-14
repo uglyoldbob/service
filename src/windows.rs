@@ -98,12 +98,12 @@ impl ServiceController {
     }
 
     /// Request access to the specified service, with the specified access permissions. [winapi::um::winsvc::SC_MANAGER_ALL_ACCESS](winapi::um::winsvc::SC_MANAGER_ALL_ACCESS) enumerates all possibilites for access levels.
-    pub fn open_service(&self, name: &str, access: DWORD) -> Option<ServiceHandle> {
+    pub fn open_service(&self, name: &str, access: DWORD) -> Result<ServiceHandle, DWORD> {
         let handle = unsafe { OpenServiceW(self.handle, get_utf16(name).as_ptr(), access) };
         if handle.is_null() {
-            None
+            Err(unsafe { winapi::um::errhandlingapi::GetLastError() })
         } else {
-            Some(ServiceHandle { handle })
+            Ok(ServiceHandle { handle })
         }
     }
 }
@@ -192,7 +192,7 @@ impl Service {
             .unwrap_or_else(|| panic!("Unable to get service controller")); //TODO REMOVE RIGHTS NOT REQUIRED
         let service =
             service_manager.open_service(&self.name, winapi::um::winsvc::SERVICE_ALL_ACCESS);
-        service.is_some()
+        service.is_ok()
     }
 
     /// Stop the service
@@ -283,12 +283,12 @@ impl Service {
 
     /// Delete the service
     pub fn delete(&mut self) -> Result<(), ()> {
-        let _e = eventlog::deregister(&format!("{} Log", self.name));
         let service_manager = ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS); //TODO REMOVE RIGHTS NOT REQUIRED
+        let _e = eventlog::deregister(&format!("{} Log", self.name));
         if let Some(service_manager) = service_manager {
             let service = service_manager
                 .open_service(&self.name, winapi::um::winsvc::SERVICE_ALL_ACCESS)
-                .unwrap();
+                .map_err(|_| ())?;
             if unsafe { winapi::um::winsvc::DeleteService(service.get_handle()) } == 0 {
                 return Err(());
             }
