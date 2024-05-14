@@ -6,7 +6,7 @@ fn main() {
 
     let mut exe = std::env::current_exe().unwrap();
     exe.pop();
-    let exe = exe.join("service");
+    let exe = exe.join("example-service");
 
     let mut service_config = service::ServiceConfig::new(
         vec!["example-arg1".to_string(), "arg2".to_string()],
