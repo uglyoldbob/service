@@ -5,6 +5,7 @@ edition = "2018"
 publish = ["crates-io"]
 
 [dependencies]
+futures = "0.3.30"
 service = { version = "0.1.0", path = "../../service", features = ["async"] }
 
 [dependencies.tokio]

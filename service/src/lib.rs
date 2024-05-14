@@ -16,6 +16,7 @@ pub enum LogLevel {
     Error,
 }
 
+#[derive(Debug)]
 pub enum ServiceEvent<T> {
     Continue,
     Pause,

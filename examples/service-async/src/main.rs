@@ -9,14 +9,21 @@ async fn smain() {
 
 #[cfg(windows)]
 async fn smain_start(
-    rx: std::sync::mpsc::Receiver<service::ServiceEvent<u64>>,
-    tx: std::sync::mpsc::Sender<service::ServiceEvent<u64>>,
+    mut rx: tokio::sync::mpsc::Receiver<service::ServiceEvent<u64>>,
+    tx: tokio::sync::mpsc::Sender<service::ServiceEvent<u64>>,
     args: Vec<String>,
     standalone_mode: bool,
 ) -> u32 {
+    use futures::FutureExt;
+
     service::log::debug!("The service arguments are {:?}", args);
     service::log::debug!("The service env args are {:?}", std::env::args());
-    smain().await;
+    loop {
+        futures::select! {
+            () = smain().fuse() => break,
+            m = rx.recv().fuse() => service::log::debug!("Received message {:?}", m),
+        }
+    }
     0
 }
 

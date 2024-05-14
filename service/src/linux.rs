@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+#[derive(Debug)]
 pub struct Session(String);
 
 /// The configuration for constructing a Service.
