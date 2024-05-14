@@ -4,6 +4,8 @@ use std::path::PathBuf;
 
 use std::os::windows::ffi::OsStrExt;
 
+use std::sync::{Arc, Mutex};
+
 use winapi::shared::minwindef::DWORD;
 use winapi::um::winsvc::CloseServiceHandle;
 use winapi::um::winsvc::OpenSCManagerW;
@@ -13,6 +15,14 @@ use winapi::um::winsvc::StartServiceW;
 use winapi::um::winsvc::SC_HANDLE;
 use winapi::um::winsvc::SERVICE_RUNNING;
 use winapi::um::winsvc::SERVICE_START_PENDING;
+
+struct ServiceStatusHandle(winapi::um::winsvc::SERVICE_STATUS_HANDLE);
+
+unsafe impl Send for ServiceStatusHandle {}
+
+lazy_static::lazy_static! {
+    static ref SERVICE_HANDLE : Arc<Mutex<ServiceStatusHandle>> = Arc::new(Mutex::new(ServiceStatusHandle(std::ptr::null_mut())));
+}
 
 /// The function used to dispatch a windows service.
 pub type DispatchFn =
@@ -366,7 +376,7 @@ impl Service {
     /// Run the required dispatch code for windows
     pub fn dispatch(&self, service_main: DispatchFn) -> Result<(), ()> {
         std::env::set_var("SERVICE_NAME", &self.name);
-        /// The service is setup with SERVICE_WIN32_OWN_PROCESS, so this argument is ignored, but cannot be null
+        // The service is setup with SERVICE_WIN32_OWN_PROCESS, so this argument is ignored, but cannot be null
         let service_name = get_utf16("");
         let service_table: &[winapi::um::winsvc::SERVICE_TABLE_ENTRYW] = &[
             winapi::um::winsvc::SERVICE_TABLE_ENTRYW {
@@ -417,7 +427,10 @@ unsafe extern "system" fn service_handler<T>(
     log::debug!("The command for service handler is {}", control);
     match control {
         winapi::um::winsvc::SERVICE_CONTROL_STOP | winapi::um::winsvc::SERVICE_CONTROL_SHUTDOWN => {
-            set_service_status(todo!(), winapi::um::winsvc::SERVICE_STOP_PENDING, 10);
+            use std::ops::DerefMut;
+            let mut sh = SERVICE_HANDLE.lock().unwrap();
+            let ServiceStatusHandle(h) = sh.deref_mut();
+            set_service_status(*h, winapi::um::winsvc::SERVICE_STOP_PENDING, 10);
             let _ = (*tx).send(crate::ServiceEvent::Stop);
             0
         }
@@ -517,6 +530,8 @@ pub fn run_service<T>(
             &mut tx as *mut _ as winapi::shared::minwindef::LPVOID,
         )
     };
+    let mut sh = SERVICE_HANDLE.lock().unwrap();
+    *sh = ServiceStatusHandle(handle);
     set_service_status(handle, winapi::um::winsvc::SERVICE_START_PENDING, 0);
     set_service_status(handle, winapi::um::winsvc::SERVICE_RUNNING, 0);
     service_main(rx, tx2, args, false);
