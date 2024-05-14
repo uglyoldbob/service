@@ -16,12 +16,18 @@ use winapi::um::winsvc::SC_HANDLE;
 use winapi::um::winsvc::SERVICE_RUNNING;
 use winapi::um::winsvc::SERVICE_START_PENDING;
 
-struct ServiceStatusHandle(winapi::um::winsvc::SERVICE_STATUS_HANDLE);
+pub struct ServiceStatusHandle(winapi::um::winsvc::SERVICE_STATUS_HANDLE);
+
+impl ServiceStatusHandle {
+    pub fn new(a: winapi::um::winsvc::SERVICE_STATUS_HANDLE) -> Self {
+        Self(a)
+    }
+}
 
 unsafe impl Send for ServiceStatusHandle {}
 
 lazy_static::lazy_static! {
-    static ref SERVICE_HANDLE : Arc<Mutex<ServiceStatusHandle>> = Arc::new(Mutex::new(ServiceStatusHandle(std::ptr::null_mut())));
+    pub static ref SERVICE_HANDLE : Arc<Mutex<ServiceStatusHandle>> = Arc::new(Mutex::new(ServiceStatusHandle(std::ptr::null_mut())));
 }
 
 /// The function used to dispatch a windows service.
@@ -35,10 +41,17 @@ pub type ServiceFn<T> = fn(
     standalone_mode: bool,
 ) -> u32;
 
+pub type ServiceFnAsync<T> = fn(
+    rx: std::sync::mpsc::Receiver<crate::ServiceEvent<T>>,
+    tx: std::sync::mpsc::Sender<crate::ServiceEvent<T>>,
+    args: Vec<String>,
+    standalone_mode: bool,
+) -> u32;
+
 pub struct Session(u32);
 
 /// Converts a utf8 string into a utf-16 string for windows
-fn get_utf16(value: &str) -> Vec<u16> {
+pub fn get_utf16(value: &str) -> Vec<u16> {
     std::ffi::OsStr::new(value)
         .encode_wide()
         .chain(std::iter::once(0))
@@ -417,7 +430,53 @@ macro_rules! ServiceMacro {
     };
 }
 
-unsafe extern "system" fn service_handler<T>(
+/// The macro generates the service function required for windows
+#[macro_export]
+macro_rules! ServiceAsyncMacro {
+    ($entry:ident, $function:ident, $t:ident) => {
+        extern "system" fn $entry(
+            argc: service::winapi::shared::minwindef::DWORD,
+            argv: *mut service::winapi::um::winnt::LPWSTR,
+        ) {
+            let name = std::env::var("SERVICE_NAME").unwrap();
+            let args = service::convert_args(argc, argv);
+            service::log::debug!("The arguments are {:?}", args);
+            service::log::debug!("Env args are {:?}", std::env::args());
+            let (mut tx, rx) = std::sync::mpsc::channel();
+            let tx2: std::sync::mpsc::Sender<service::ServiceEvent<$t>> = tx.clone();
+            let handle = unsafe {
+                service::winapi::um::winsvc::RegisterServiceCtrlHandlerExW(
+                    service::get_utf16(&name).as_ptr(),
+                    Some(service::service_handler::<$t>),
+                    &mut tx as *mut _ as service::winapi::shared::minwindef::LPVOID,
+                )
+            };
+            let mut sh = service::SERVICE_HANDLE.lock().unwrap();
+            *sh = service::ServiceStatusHandle::new(handle);
+            service::set_service_status(
+                handle,
+                service::winapi::um::winsvc::SERVICE_START_PENDING,
+                0,
+            );
+            service::set_service_status(handle, service::winapi::um::winsvc::SERVICE_RUNNING, 0);
+
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .unwrap();
+
+            let service_thread = runtime.spawn(async move {
+                service::log::debug!("Running async function now");
+                $function(rx, tx2, args, false).await;
+            });
+            runtime.block_on(service_thread).unwrap();
+            service::set_service_status(handle, service::winapi::um::winsvc::SERVICE_STOPPED, 0);
+        }
+    };
+}
+
+pub unsafe extern "system" fn service_handler<T>(
     control: winapi::shared::minwindef::DWORD,
     event_type: winapi::shared::minwindef::DWORD,
     event_data: winapi::shared::minwindef::LPVOID,
@@ -490,7 +549,7 @@ unsafe extern "system" fn service_handler<T>(
 }
 
 /// Report the status of the service to windows
-fn set_service_status(
+pub fn set_service_status(
     status_handle: winapi::um::winsvc::SERVICE_STATUS_HANDLE,
     current_state: winapi::shared::minwindef::DWORD,
     wait_hint: winapi::shared::minwindef::DWORD,
