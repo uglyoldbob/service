@@ -365,6 +365,7 @@ impl Service {
 
     /// Run the required dispatch code for windows
     pub fn dispatch(&self, service_main: DispatchFn) -> Result<(), ()> {
+        std::env::set_var("SERVICE_NAME", &self.name);
         /// The service is setup with SERVICE_WIN32_OWN_PROCESS, so this argument is ignored, but cannot be null
         let service_name = get_utf16("");
         let service_table: &[winapi::um::winsvc::SERVICE_TABLE_ENTRYW] = &[
@@ -395,12 +396,13 @@ impl Service {
 /// The macro generates the service function required for windows
 #[macro_export]
 macro_rules! ServiceMacro {
-    ($entry:ident, $function:ident, $name:expr) => {
+    ($entry:ident, $function:ident) => {
         extern "system" fn $entry(
             argc: winapi::shared::minwindef::DWORD,
             argv: *mut winapi::um::winnt::LPWSTR,
         ) {
-            service::run_service($function, $name, argc, argv);
+            let name = std::env::var("SERVICE_NAME").unwrap();
+            service::run_service($function, &name, argc, argv);
         }
     };
 }

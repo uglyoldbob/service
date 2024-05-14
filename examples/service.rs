@@ -21,7 +21,7 @@ fn smain_start(
 }
 
 #[cfg(windows)]
-service::ServiceMacro!(service_starter, smain_start, "example-service");
+service::ServiceMacro!(service_starter, smain_start);
 
 #[cfg(windows)]
 fn main() {
