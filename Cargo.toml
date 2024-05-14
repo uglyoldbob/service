@@ -20,7 +20,7 @@ simple_logger = "4.3.3"
 [target.'cfg(windows)'.dependencies]
 eventlog = "0.2.2"
 widestring = "1.1.0"
-winapi = {version = "0.3.9", features = ["errhandlingapi", "winsvc"]}
+winapi = {version = "0.3.9", features = ["errhandlingapi", "winsvc", "winuser"]}
 
 [features]
 async = [ "dep:tokio" ]

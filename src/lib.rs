@@ -16,6 +16,21 @@ pub enum LogLevel {
     Error,
 }
 
+pub enum ServiceEvent<T> {
+    Continue,
+    Pause,
+    Stop,
+    SessionConnect(Session),
+    SessionDisconnect(Session),
+    SessionRemoteConnect(Session),
+    SessionRemoteDisconnect(Session),
+    SessionLogon(Session),
+    SessionLogoff(Session),
+    SessionLock(Session),
+    SessionUnlock(Session),
+    Custom(T),
+}
+
 impl LogLevel {
     pub fn level_filter(&self) -> log::LevelFilter {
         match self {
@@ -47,12 +62,14 @@ cfg_if::cfg_if! {
         pub use self::windows::ServiceFn as ServiceFn;
         pub use self::windows::convert_args as convert_args;
         pub use self::windows::run_service as run_service;
+        pub use self::windows::Session as Session;
     } else if #[cfg(target_os = "macos")] {
         todo!();
     } else if #[cfg(target_os = "linux")] {
         mod linux;
         pub use self::linux::ServiceConfig as ServiceConfig;
         pub use self::linux::Service as Service;
+        pub use self::linux::Session as Session;
     } else {
         todo!();
     }

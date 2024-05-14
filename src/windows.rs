@@ -14,7 +14,18 @@ use winapi::um::winsvc::SC_HANDLE;
 use winapi::um::winsvc::SERVICE_RUNNING;
 use winapi::um::winsvc::SERVICE_START_PENDING;
 
-pub type ServiceFn = extern "system" fn(winapi::shared::minwindef::DWORD, *mut winapi::um::winnt::LPWSTR);
+/// The function used to dispatch a windows service.
+pub type DispatchFn =
+    extern "system" fn(winapi::shared::minwindef::DWORD, *mut winapi::um::winnt::LPWSTR);
+
+pub type ServiceFn<T> = fn(
+    rx: std::sync::mpsc::Receiver<crate::ServiceEvent<T>>,
+    tx: std::sync::mpsc::Sender<crate::ServiceEvent<T>>,
+    args: Vec<String>,
+    standalone_mode: bool,
+) -> u32;
+
+pub struct Session(u32);
 
 /// Converts a utf8 string into a utf-16 string for windows
 fn get_utf16(value: &str) -> Vec<u16> {
@@ -25,7 +36,10 @@ fn get_utf16(value: &str) -> Vec<u16> {
 }
 
 /// Convert the windows style arguments to a vec of string
-pub fn convert_args(argc: winapi::shared::minwindef::DWORD, argv: *mut winapi::um::winnt::LPWSTR) -> Vec<String> {
+pub fn convert_args(
+    argc: winapi::shared::minwindef::DWORD,
+    argv: *mut winapi::um::winnt::LPWSTR,
+) -> Vec<String> {
     let mut args = Vec::new();
 
     args
@@ -350,11 +364,9 @@ impl Service {
     }
 
     /// Run the required dispatch code for windows
-    pub fn dispatch(
-        &self,
-        service_main: ServiceFn,
-    ) -> Result<(), ()> {
-        let service_name = get_utf16(&self.name);
+    pub fn dispatch(&self, service_main: DispatchFn) -> Result<(), ()> {
+        /// The service is setup with SERVICE_WIN32_OWN_PROCESS, so this argument is ignored, but cannot be null
+        let service_name = get_utf16("");
         let service_table: &[winapi::um::winsvc::SERVICE_TABLE_ENTRYW] = &[
             winapi::um::winsvc::SERVICE_TABLE_ENTRYW {
                 lpServiceName: service_name.as_ptr() as _,
@@ -366,10 +378,13 @@ impl Service {
                 lpServiceProc: None,
             },
         ];
-    
-        let result = unsafe { winapi::um::winsvc::StartServiceCtrlDispatcherW(service_table.as_ptr()) };
+
+        let result =
+            unsafe { winapi::um::winsvc::StartServiceCtrlDispatcherW(service_table.as_ptr()) };
         if result == 0 {
-            println!("The error was {}", unsafe { winapi::um::errhandlingapi::GetLastError() });
+            println!("The error was {}", unsafe {
+                winapi::um::errhandlingapi::GetLastError()
+            });
             Err(())
         } else {
             Ok(())
@@ -380,15 +395,128 @@ impl Service {
 /// The macro generates the service function required for windows
 #[macro_export]
 macro_rules! ServiceMacro {
-    ($entry:ident, $function:ident) => {
-        extern "system" fn $entry(argc: winapi::shared::minwindef::DWORD, argv: *mut winapi::um::winnt::LPWSTR) {
-            service::run_service($function, argc, argv);
+    ($entry:ident, $function:ident, $name:expr) => {
+        extern "system" fn $entry(
+            argc: winapi::shared::minwindef::DWORD,
+            argv: *mut winapi::um::winnt::LPWSTR,
+        ) {
+            service::run_service($function, $name, argc, argv);
         }
     };
 }
 
+unsafe extern "system" fn service_handler<T>(
+    control: winapi::shared::minwindef::DWORD,
+    event_type: winapi::shared::minwindef::DWORD,
+    event_data: winapi::shared::minwindef::LPVOID,
+    context: winapi::shared::minwindef::LPVOID,
+) -> winapi::shared::minwindef::DWORD {
+    let tx = context as *mut std::sync::mpsc::Sender<crate::ServiceEvent<T>>;
+    log::debug!("The command for service handler is {}", control);
+    match control {
+        winapi::um::winsvc::SERVICE_CONTROL_STOP | winapi::um::winsvc::SERVICE_CONTROL_SHUTDOWN => {
+            set_service_status(todo!(), winapi::um::winsvc::SERVICE_STOP_PENDING, 10);
+            let _ = (*tx).send(crate::ServiceEvent::Stop);
+            0
+        }
+        winapi::um::winsvc::SERVICE_CONTROL_PAUSE => {
+            let _ = (*tx).send(crate::ServiceEvent::Pause);
+            0
+        }
+        winapi::um::winsvc::SERVICE_CONTROL_CONTINUE => {
+            let _ = (*tx).send(crate::ServiceEvent::Continue);
+            0
+        }
+        winapi::um::winsvc::SERVICE_CONTROL_SESSIONCHANGE => {
+            let event = event_type;
+            let session_notification =
+                event_data as *const winapi::um::winuser::WTSSESSION_NOTIFICATION;
+            let session_id = (*session_notification).dwSessionId;
+            let session = Session(session_id);
+
+            match event as usize {
+                winapi::um::winuser::WTS_CONSOLE_CONNECT => {
+                    let _ = (*tx).send(crate::ServiceEvent::SessionConnect(session));
+                    0
+                }
+                winapi::um::winuser::WTS_CONSOLE_DISCONNECT => {
+                    let _ = (*tx).send(crate::ServiceEvent::SessionDisconnect(session));
+                    0
+                }
+                winapi::um::winuser::WTS_REMOTE_CONNECT => {
+                    let _ = (*tx).send(crate::ServiceEvent::SessionRemoteConnect(session));
+                    0
+                }
+                winapi::um::winuser::WTS_REMOTE_DISCONNECT => {
+                    let _ = (*tx).send(crate::ServiceEvent::SessionRemoteDisconnect(session));
+                    0
+                }
+                winapi::um::winuser::WTS_SESSION_LOGON => {
+                    let _ = (*tx).send(crate::ServiceEvent::SessionLogon(session));
+                    0
+                }
+                winapi::um::winuser::WTS_SESSION_LOGOFF => {
+                    let _ = (*tx).send(crate::ServiceEvent::SessionLogoff(session));
+                    0
+                }
+                winapi::um::winuser::WTS_SESSION_LOCK => {
+                    let _ = (*tx).send(crate::ServiceEvent::SessionLock(session));
+                    0
+                }
+                winapi::um::winuser::WTS_SESSION_UNLOCK => {
+                    let _ = (*tx).send(crate::ServiceEvent::SessionUnlock(session));
+                    0
+                }
+                _ => 0,
+            }
+        }
+        _ => winapi::shared::winerror::ERROR_CALL_NOT_IMPLEMENTED,
+    }
+}
+
+/// Report the status of the service to windows
+fn set_service_status(
+    status_handle: winapi::um::winsvc::SERVICE_STATUS_HANDLE,
+    current_state: winapi::shared::minwindef::DWORD,
+    wait_hint: winapi::shared::minwindef::DWORD,
+) {
+    let mut service_status = winapi::um::winsvc::SERVICE_STATUS {
+        dwServiceType: winapi::um::winnt::SERVICE_WIN32_OWN_PROCESS,
+        dwCurrentState: current_state,
+        dwControlsAccepted: winapi::um::winsvc::SERVICE_ACCEPT_STOP
+            | winapi::um::winsvc::SERVICE_ACCEPT_SHUTDOWN
+            | winapi::um::winsvc::SERVICE_ACCEPT_PAUSE_CONTINUE,
+        dwWin32ExitCode: 0,
+        dwServiceSpecificExitCode: 0,
+        dwCheckPoint: 0,
+        dwWaitHint: wait_hint,
+    };
+    unsafe {
+        winapi::um::winsvc::SetServiceStatus(status_handle, &mut service_status);
+    }
+}
+
 /// Runs the main service function
-pub fn run_service(service_main: ServiceFn, argc: winapi::shared::minwindef::DWORD, argv: *mut winapi::um::winnt::LPWSTR) {
+pub fn run_service<T>(
+    service_main: ServiceFn<T>,
+    name: &str,
+    argc: winapi::shared::minwindef::DWORD,
+    argv: *mut winapi::um::winnt::LPWSTR,
+) {
     let args = convert_args(argc, argv);
     log::debug!("The arguments are {:?}", args);
+    log::debug!("Env args are {:?}", std::env::args());
+    let (mut tx, rx) = std::sync::mpsc::channel();
+    let tx2 = tx.clone();
+    let handle = unsafe {
+        winapi::um::winsvc::RegisterServiceCtrlHandlerExW(
+            get_utf16(name).as_ptr(),
+            Some(service_handler::<T>),
+            &mut tx as *mut _ as winapi::shared::minwindef::LPVOID,
+        )
+    };
+    set_service_status(handle, winapi::um::winsvc::SERVICE_START_PENDING, 0);
+    set_service_status(handle, winapi::um::winsvc::SERVICE_RUNNING, 0);
+    service_main(rx, tx2, args, false);
+    set_service_status(handle, winapi::um::winsvc::SERVICE_STOPPED, 0);
 }

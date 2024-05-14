@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+pub struct Session(String);
+
 /// The configuration for constructing a Service.
 pub struct ServiceConfig {
     /// The arguments for the service
