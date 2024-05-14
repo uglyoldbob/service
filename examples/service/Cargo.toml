@@ -6,6 +6,3 @@ publish = ["crates-io"]
 
 [dependencies]
 service = { version = "0.1.0", path = "../../service" }
-
-[target.'cfg(windows)'.dependencies]
-winapi = {version = "0.3.9", features = ["errhandlingapi", "winsvc", "winuser"]}

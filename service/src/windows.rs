@@ -408,8 +408,8 @@ impl Service {
 macro_rules! ServiceMacro {
     ($entry:ident, $function:ident) => {
         extern "system" fn $entry(
-            argc: winapi::shared::minwindef::DWORD,
-            argv: *mut winapi::um::winnt::LPWSTR,
+            argc: service::winapi::shared::minwindef::DWORD,
+            argv: *mut service::winapi::um::winnt::LPWSTR,
         ) {
             let name = std::env::var("SERVICE_NAME").unwrap();
             service::run_service($function, &name, argc, argv);
@@ -499,8 +499,7 @@ fn set_service_status(
         dwServiceType: winapi::um::winnt::SERVICE_WIN32_OWN_PROCESS,
         dwCurrentState: current_state,
         dwControlsAccepted: winapi::um::winsvc::SERVICE_ACCEPT_STOP
-            | winapi::um::winsvc::SERVICE_ACCEPT_SHUTDOWN
-            | winapi::um::winsvc::SERVICE_ACCEPT_PAUSE_CONTINUE,
+            | winapi::um::winsvc::SERVICE_ACCEPT_SHUTDOWN,
         dwWin32ExitCode: 0,
         dwServiceSpecificExitCode: 0,
         dwCheckPoint: 0,
@@ -512,7 +511,7 @@ fn set_service_status(
 }
 
 /// Runs the main service function
-pub fn run_service<T>(
+pub fn run_service<T: std::marker::Send + 'static>(
     service_main: ServiceFn<T>,
     name: &str,
     argc: winapi::shared::minwindef::DWORD,
@@ -522,7 +521,7 @@ pub fn run_service<T>(
     log::debug!("The arguments are {:?}", args);
     log::debug!("Env args are {:?}", std::env::args());
     let (mut tx, rx) = std::sync::mpsc::channel();
-    let tx2 = tx.clone();
+    let tx2: std::sync::mpsc::Sender<crate::ServiceEvent<T>> = tx.clone();
     let handle = unsafe {
         winapi::um::winsvc::RegisterServiceCtrlHandlerExW(
             get_utf16(name).as_ptr(),
@@ -534,6 +533,9 @@ pub fn run_service<T>(
     *sh = ServiceStatusHandle(handle);
     set_service_status(handle, winapi::um::winsvc::SERVICE_START_PENDING, 0);
     set_service_status(handle, winapi::um::winsvc::SERVICE_RUNNING, 0);
-    service_main(rx, tx2, args, false);
+    let service_thread = std::thread::spawn(move || {
+        service_main(rx, tx2, args, false);
+    });
+    service_thread.join();
     set_service_status(handle, winapi::um::winsvc::SERVICE_STOPPED, 0);
 }
