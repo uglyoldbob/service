@@ -14,12 +14,21 @@ use winapi::um::winsvc::SC_HANDLE;
 use winapi::um::winsvc::SERVICE_RUNNING;
 use winapi::um::winsvc::SERVICE_START_PENDING;
 
+pub type ServiceFn = extern "system" fn(winapi::shared::minwindef::DWORD, *mut winapi::um::winnt::LPWSTR);
+
 /// Converts a utf8 string into a utf-16 string for windows
 fn get_utf16(value: &str) -> Vec<u16> {
     std::ffi::OsStr::new(value)
         .encode_wide()
         .chain(std::iter::once(0))
         .collect()
+}
+
+/// Convert the windows style arguments to a vec of string
+pub fn convert_args(argc: winapi::shared::minwindef::DWORD, argv: *mut winapi::um::winnt::LPWSTR) -> Vec<String> {
+    let mut args = Vec::new();
+
+    args
 }
 
 /// Converts an optional utf8 string into an optional utf-16 string for windows
@@ -248,6 +257,7 @@ impl Service {
 
             if service_status.dwCurrentState != SERVICE_RUNNING {
                 println!("Failed to start service {}", service_status.dwCurrentState);
+
                 Err(())
             } else {
                 Ok(())
@@ -295,8 +305,8 @@ impl Service {
             let service = unsafe {
                 winapi::um::winsvc::CreateServiceW(
                     service_manager.get_handle(),
-                    get_utf16(self.name.as_str()).as_ptr(),
-                    get_utf16(config.display.as_str()).as_ptr(),
+                    get_utf16(&self.name).as_ptr(),
+                    get_utf16(&config.display).as_ptr(),
                     config.desired_access,
                     config.service_type,
                     config.start_type,
@@ -312,7 +322,7 @@ impl Service {
             if service.is_null() {
                 return Err(());
             }
-            let mut description = get_utf16(config.description.as_str());
+            let mut description = get_utf16(&config.description);
 
             let mut sd = winapi::um::winsvc::SERVICE_DESCRIPTIONW {
                 lpDescription: description.as_mut_ptr(),
@@ -338,4 +348,47 @@ impl Service {
     pub async fn create_async(&mut self, config: ServiceConfig) -> Result<(), ()> {
         self.create(config)
     }
+
+    /// Run the required dispatch code for windows
+    pub fn dispatch(
+        &self,
+        service_main: ServiceFn,
+    ) -> Result<(), ()> {
+        let service_name = get_utf16(&self.name);
+        let service_table: &[winapi::um::winsvc::SERVICE_TABLE_ENTRYW] = &[
+            winapi::um::winsvc::SERVICE_TABLE_ENTRYW {
+                lpServiceName: service_name.as_ptr() as _,
+                lpServiceProc: Some(service_main),
+            },
+            // the last item has to be { null, null }
+            winapi::um::winsvc::SERVICE_TABLE_ENTRYW {
+                lpServiceName: std::ptr::null_mut(),
+                lpServiceProc: None,
+            },
+        ];
+    
+        let result = unsafe { winapi::um::winsvc::StartServiceCtrlDispatcherW(service_table.as_ptr()) };
+        if result == 0 {
+            println!("The error was {}", unsafe { winapi::um::errhandlingapi::GetLastError() });
+            Err(())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// The macro generates the service function required for windows
+#[macro_export]
+macro_rules! ServiceMacro {
+    ($entry:ident, $function:ident) => {
+        extern "system" fn $entry(argc: winapi::shared::minwindef::DWORD, argv: *mut winapi::um::winnt::LPWSTR) {
+            service::run_service($function, argc, argv);
+        }
+    };
+}
+
+/// Runs the main service function
+pub fn run_service(service_main: ServiceFn, argc: winapi::shared::minwindef::DWORD, argv: *mut winapi::um::winnt::LPWSTR) {
+    let args = convert_args(argc, argv);
+    log::debug!("The arguments are {:?}", args);
 }
