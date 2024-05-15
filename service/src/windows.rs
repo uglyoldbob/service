@@ -16,20 +16,27 @@ use winapi::um::winsvc::SC_HANDLE;
 use winapi::um::winsvc::SERVICE_RUNNING;
 use winapi::um::winsvc::SERVICE_START_PENDING;
 
+/// A handle for setting the status of the service
 pub struct ServiceStatusHandle(winapi::um::winsvc::SERVICE_STATUS_HANDLE);
 
 #[derive(Debug)]
+/// Errors that can occur starting the service
 pub enum StartServiceError {
+    /// A windows specific error code
     WindowsError(DWORD),
+    /// The service could not be brought into the started state
     FailedToStart(DWORD),
 }
 
 #[derive(Debug)]
+/// Errors that can occur creating the service
 pub enum CreateServiceError {
+    /// A windows specific error code
     WindowsError(DWORD),
 }
 
 impl ServiceStatusHandle {
+    /// Create a new handle
     pub fn new(a: winapi::um::winsvc::SERVICE_STATUS_HANDLE) -> Self {
         Self(a)
     }
@@ -38,6 +45,7 @@ impl ServiceStatusHandle {
 unsafe impl Send for ServiceStatusHandle {}
 
 lazy_static::lazy_static! {
+    /// The service handle for updating the status of the service that is running
     pub static ref SERVICE_HANDLE : Arc<Mutex<ServiceStatusHandle>> = Arc::new(Mutex::new(ServiceStatusHandle(std::ptr::null_mut())));
 }
 
@@ -45,6 +53,7 @@ lazy_static::lazy_static! {
 pub type DispatchFn =
     extern "system" fn(winapi::shared::minwindef::DWORD, *mut winapi::um::winnt::LPWSTR);
 
+/// The type for the service function. Receives commands from windows to control the actual service.
 pub type ServiceFn<T> = fn(
     rx: std::sync::mpsc::Receiver<crate::ServiceEvent<T>>,
     tx: std::sync::mpsc::Sender<crate::ServiceEvent<T>>,
@@ -52,6 +61,7 @@ pub type ServiceFn<T> = fn(
     standalone_mode: bool,
 ) -> u32;
 
+/// The type for the service function. Receives commands from windows to control the actual service. This is the async version of ServiceFn.
 pub type ServiceFnAsync<T> = fn(
     rx: std::sync::mpsc::Receiver<crate::ServiceEvent<T>>,
     tx: std::sync::mpsc::Sender<crate::ServiceEvent<T>>,
@@ -60,6 +70,7 @@ pub type ServiceFnAsync<T> = fn(
 ) -> u32;
 
 #[derive(Debug)]
+/// The session id for windows service messages
 pub struct Session(u32);
 
 /// Converts a utf8 string into a utf-16 string for windows
@@ -164,15 +175,20 @@ pub struct ServiceConfig {
     pub display: String,
     /// The password for the user that the service should run as
     pub user_password: Option<String>,
+    /// The level of access to the service
     pub desired_access: DWORD,
+    /// The service type according to windows
     pub service_type: DWORD,
+    /// The service start options according to windows
     pub start_type: DWORD,
+    /// Defines how the service responds to errors if the service fails to start
     pub error_control: DWORD,
+    /// Used to receive an ide for the load_order_group
     pub tag_id: DWORD,
+    /// Load ordering groups that the service should belong to
     pub load_order_group: Option<String>,
+    /// Other services that must start before this one
     pub dependencies: Option<String>,
-    pub status_handle: winapi::um::winsvc::SERVICE_STATUS_HANDLE,
-    pub controls_accepted: DWORD,
 }
 
 impl ServiceConfig {
@@ -205,8 +221,6 @@ impl ServiceConfig {
             tag_id: 0,
             load_order_group: None,
             dependencies: None,
-            status_handle: std::ptr::null_mut(),
-            controls_accepted: winapi::um::winsvc::SERVICE_ACCEPT_STOP,
         }
     }
 }
@@ -480,6 +494,10 @@ macro_rules! ServiceAsyncMacro {
 }
 
 #[cfg(feature = "async")]
+/// The service handler for async code. This receives commands from windows to control the service being run.
+/// # Safety
+///
+/// context must be a valid `std::sync::mpsc::Sender<crate::ServiceEvent<T>>`, defined in `RegisterServiceCtrlHandlerExW``
 pub unsafe extern "system" fn service_handler_async<T>(
     control: winapi::shared::minwindef::DWORD,
     event_type: winapi::shared::minwindef::DWORD,

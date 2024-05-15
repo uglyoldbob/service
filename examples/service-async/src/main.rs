@@ -22,12 +22,9 @@ async fn smain_start(
         tokio::select! {
             Some(m) = rx.recv() => {
                 service::log::debug!("Received message {:?}", m);
-                match m {
-                    service::ServiceEvent::Stop => {
-                        service::log::debug!("Attempting to stop");
-                        break;
-                    }
-                    _ => {}
+                if let service::ServiceEvent::Stop = m {
+                    service::log::debug!("Attempting to stop");
+                    break;
                 }
             }
         }

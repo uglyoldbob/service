@@ -1,16 +1,26 @@
+//! Linux specific code for managing a service
+
 use std::path::PathBuf;
 
 #[derive(Debug)]
+/// Errors that can occur when interfacing with systemctl
 pub enum StartStopError {
+    /// Systemctl does not exist or is not callable for some reason
     NoSystemCtl,
+    /// The systemctl command returned an error
     SystemCtlFailed,
 }
 
 #[derive(Debug)]
+/// Errors that can occur when creating a service
 pub enum CreateError {
+    /// Systemctl does not exist or is not callable for some reason
     NoSystemCtl,
+    /// The systemctl command returned an error
     SystemCtlFailed,
+    /// Systemctl reload command failed for some reason
     SystemCtlReloadFailed,
+    /// Unable to create or write to the systemctl service file
     FileIoError(std::io::Error),
 }
 
@@ -24,6 +34,7 @@ impl From<StartStopError> for CreateError {
 }
 
 #[derive(Debug)]
+/// A placeholder, not currently used
 pub struct Session(String);
 
 /// The configuration for constructing a Service.
@@ -151,6 +162,7 @@ impl Service {
         }
     }
 
+    /// Construct the systemd file with the specified config
     fn build_systemd_file(&self, config: ServiceConfig) -> String {
         let mut con = String::new();
         con.push_str("[Unit]\n");
