@@ -3,7 +3,7 @@ async fn smain() {
     loop {
         std::thread::sleep(std::time::Duration::from_millis(1000));
         i += 1;
-        service::log::debug!("I am groot {}", i);
+        service::log::debug!("I am groot async {}", i);
     }
 }
 
@@ -45,6 +45,7 @@ async fn main() {
     if let Err(e) = service.dispatch(service_starter) {
         service::log::error!("Failed to dispatch service: {:?}", e);
     }
+    service::log::debug!("Service stopping");
 }
 
 #[cfg(not(windows))]

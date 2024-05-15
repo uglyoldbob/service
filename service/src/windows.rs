@@ -404,7 +404,6 @@ impl Service {
 
     /// Run the required dispatch code for windows
     pub fn dispatch(&self, service_main: DispatchFn) -> Result<(), DWORD> {
-        std::env::set_var("SERVICE_NAME", &self.name);
         // The service is setup with SERVICE_WIN32_OWN_PROCESS, so this argument is ignored, but cannot be null
         let service_name = get_utf16("");
         let service_table: &[winapi::um::winsvc::SERVICE_TABLE_ENTRYW] = &[
@@ -437,9 +436,8 @@ macro_rules! ServiceMacro {
             argc: service::winapi::shared::minwindef::DWORD,
             argv: *mut service::winapi::um::winnt::LPWSTR,
         ) {
-            let name = std::env::var("SERVICE_NAME").unwrap();
             let args = unsafe { service::convert_args(argc, argv) };
-            service::run_service($function, &name, args);
+            service::run_service($function, args);
         }
     };
 }
@@ -453,8 +451,8 @@ macro_rules! ServiceAsyncMacro {
             argc: service::winapi::shared::minwindef::DWORD,
             argv: *mut service::winapi::um::winnt::LPWSTR,
         ) {
-            let name = std::env::var("SERVICE_NAME").unwrap();
             let args = unsafe { service::convert_args(argc, argv) };
+            let name = args.get(0).unwrap();
             let (tx, rx) = tokio::sync::mpsc::channel(10);
             let tx2: tokio::sync::mpsc::Sender<service::ServiceEvent<$t>> = tx.clone();
             let mut tx = Box::new(tx);
@@ -665,12 +663,8 @@ pub unsafe fn set_service_status(
 }
 
 /// Runs the main service function
-pub fn run_service<T: std::marker::Send + 'static>(
-    service_main: ServiceFn<T>,
-    name: &str,
-    args: Vec<String>,
-) {
-    log::debug!("The arguments are {:?}", args);
+pub fn run_service<T: std::marker::Send + 'static>(service_main: ServiceFn<T>, args: Vec<String>) {
+    let name = args.get(0).unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
     let tx2: std::sync::mpsc::Sender<crate::ServiceEvent<T>> = tx.clone();
     let tx = Box::new(tx);
