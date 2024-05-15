@@ -71,17 +71,18 @@ pub fn get_utf16(value: &str) -> Vec<u16> {
 }
 
 /// Convert the windows style arguments to a vec of string
-pub fn convert_args(
+/// # Safety
+///
+/// argv must be valid - typically straight from windows
+pub unsafe fn convert_args(
     argc: winapi::shared::minwindef::DWORD,
     argv: *mut winapi::um::winnt::LPWSTR,
 ) -> Vec<String> {
     let mut args = Vec::new();
     for i in 0..argc {
-        unsafe {
-            let s = *argv.add(i as usize);
-            let widestr = widestring::WideCString::from_ptr_str(s);
-            args.push(widestr.to_string_lossy());
-        }
+        let s = *argv.add(i as usize);
+        let widestr = widestring::WideCString::from_ptr_str(s);
+        args.push(widestr.to_string_lossy());
     }
     args
 }
@@ -194,7 +195,7 @@ impl ServiceConfig {
             arguments,
             description,
             binary,
-            username: username,
+            username,
             display: String::new(),
             user_password: None,
             desired_access: winapi::um::winsvc::SERVICE_ALL_ACCESS,
@@ -276,7 +277,7 @@ impl Service {
     /// Start the service
     pub fn start(&mut self) -> Result<(), StartServiceError> {
         let service_manager = ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS)
-            .map_err(|e| StartServiceError::WindowsError(e))?; //TODO REMOVE RIGHTS NOT REQUIRED
+            .map_err(StartServiceError::WindowsError)?; //TODO REMOVE RIGHTS NOT REQUIRED
         let service = service_manager
             .open_service(&self.name, winapi::um::winsvc::SERVICE_ALL_ACCESS)
             .unwrap();
@@ -333,7 +334,7 @@ impl Service {
     pub fn create(&mut self, config: ServiceConfig) -> Result<(), CreateServiceError> {
         eventlog::register(&format!("{} Log", self.name)).unwrap();
         let service_manager = ServiceController::open(winapi::um::winsvc::SC_MANAGER_ALL_ACCESS)
-            .map_err(|e| CreateServiceError::WindowsError(e))?; //TODO REMOVE RIGHTS NOT REQUIRED
+            .map_err(CreateServiceError::WindowsError)?; //TODO REMOVE RIGHTS NOT REQUIRED
         let exe = config.binary.as_os_str().to_str().unwrap();
         let args = config.arguments.join(" ");
         let exe_with_args = if config.arguments.is_empty() {
@@ -388,7 +389,7 @@ impl Service {
     }
 
     /// Run the required dispatch code for windows
-    pub fn dispatch(&self, service_main: DispatchFn) -> Result<(), ()> {
+    pub fn dispatch(&self, service_main: DispatchFn) -> Result<(), DWORD> {
         std::env::set_var("SERVICE_NAME", &self.name);
         // The service is setup with SERVICE_WIN32_OWN_PROCESS, so this argument is ignored, but cannot be null
         let service_name = get_utf16("");
@@ -407,10 +408,7 @@ impl Service {
         let result =
             unsafe { winapi::um::winsvc::StartServiceCtrlDispatcherW(service_table.as_ptr()) };
         if result == 0 {
-            println!("The error was {}", unsafe {
-                winapi::um::errhandlingapi::GetLastError()
-            });
-            Err(())
+            Err(unsafe { winapi::um::errhandlingapi::GetLastError() })
         } else {
             Ok(())
         }
@@ -426,11 +424,13 @@ macro_rules! ServiceMacro {
             argv: *mut service::winapi::um::winnt::LPWSTR,
         ) {
             let name = std::env::var("SERVICE_NAME").unwrap();
-            service::run_service($function, &name, argc, argv);
+            let args = unsafe { service::convert_args(argc, argv) };
+            service::run_service($function, &name, args);
         }
     };
 }
 
+#[cfg(feature = "async")]
 /// The macro generates the service function required for windows
 #[macro_export]
 macro_rules! ServiceAsyncMacro {
@@ -440,7 +440,7 @@ macro_rules! ServiceAsyncMacro {
             argv: *mut service::winapi::um::winnt::LPWSTR,
         ) {
             let name = std::env::var("SERVICE_NAME").unwrap();
-            let args = service::convert_args(argc, argv);
+            let args = unsafe { service::convert_args(argc, argv) };
             let (tx, rx) = tokio::sync::mpsc::channel(10);
             let tx2: tokio::sync::mpsc::Sender<service::ServiceEvent<$t>> = tx.clone();
             let mut tx = Box::new(tx);
@@ -459,7 +459,9 @@ macro_rules! ServiceAsyncMacro {
                 service::winapi::um::winsvc::SERVICE_START_PENDING,
                 0,
             );
-            service::set_service_status(handle, service::winapi::um::winsvc::SERVICE_RUNNING, 0);
+            unsafe {
+                service::set_service_status(handle, service::winapi::um::winsvc::SERVICE_RUNNING, 0)
+            };
 
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -468,11 +470,14 @@ macro_rules! ServiceAsyncMacro {
             runtime.block_on(async move {
                 $function(rx, tx2, args, false).await;
             });
-            service::set_service_status(handle, service::winapi::um::winsvc::SERVICE_STOPPED, 0);
+            unsafe {
+                service::set_service_status(handle, service::winapi::um::winsvc::SERVICE_STOPPED, 0)
+            };
         }
     };
 }
 
+#[cfg(feature = "async")]
 pub unsafe extern "system" fn service_handler_async<T>(
     control: winapi::shared::minwindef::DWORD,
     event_type: winapi::shared::minwindef::DWORD,
@@ -539,6 +544,10 @@ pub unsafe extern "system" fn service_handler_async<T>(
     }
 }
 
+/// Run the service handler for a windows service, handling commands from windows to control the service
+/// # Safety
+///
+/// context must be a valid `std::sync::mpsc::Sender<crate::ServiceEvent<T>>`, defined in `RegisterServiceCtrlHandlerExW``
 pub unsafe extern "system" fn service_handler<T>(
     control: winapi::shared::minwindef::DWORD,
     event_type: winapi::shared::minwindef::DWORD,
@@ -554,7 +563,7 @@ pub unsafe extern "system" fn service_handler<T>(
             let ServiceStatusHandle(h) = sh.deref_mut();
             set_service_status(*h, winapi::um::winsvc::SERVICE_STOP_PENDING, 10);
             drop(sh);
-            let _ = (*tx).send(crate::ServiceEvent::Stop).unwrap();
+            let _ = (*tx).send(crate::ServiceEvent::Stop);
             0
         }
         winapi::um::winsvc::SERVICE_CONTROL_PAUSE => {
@@ -613,7 +622,10 @@ pub unsafe extern "system" fn service_handler<T>(
 }
 
 /// Report the status of the service to windows
-pub fn set_service_status(
+/// # Safety
+///
+/// status_handle must be valid
+pub unsafe fn set_service_status(
     status_handle: winapi::um::winsvc::SERVICE_STATUS_HANDLE,
     current_state: winapi::shared::minwindef::DWORD,
     wait_hint: winapi::shared::minwindef::DWORD,
@@ -628,19 +640,17 @@ pub fn set_service_status(
         dwCheckPoint: 0,
         dwWaitHint: wait_hint,
     };
-    unsafe {
-        winapi::um::winsvc::SetServiceStatus(status_handle, &mut service_status);
-    }
+    winapi::um::winsvc::SetServiceStatus(status_handle, &mut service_status);
+    //TODO determine if the function errored, then call GetLastError
 }
 
 /// Runs the main service function
 pub fn run_service<T: std::marker::Send + 'static>(
     service_main: ServiceFn<T>,
     name: &str,
-    argc: winapi::shared::minwindef::DWORD,
-    argv: *mut winapi::um::winnt::LPWSTR,
+    args: Vec<String>,
 ) {
-    let args = convert_args(argc, argv);
+    log::debug!("The arguments are {:?}", args);
     let (tx, rx) = std::sync::mpsc::channel();
     let tx2: std::sync::mpsc::Sender<crate::ServiceEvent<T>> = tx.clone();
     let tx = Box::new(tx);
@@ -654,11 +664,11 @@ pub fn run_service<T: std::marker::Send + 'static>(
     let mut sh = SERVICE_HANDLE.lock().unwrap();
     *sh = ServiceStatusHandle(handle);
     drop(sh);
-    set_service_status(handle, winapi::um::winsvc::SERVICE_START_PENDING, 0);
-    set_service_status(handle, winapi::um::winsvc::SERVICE_RUNNING, 0);
+    unsafe { set_service_status(handle, winapi::um::winsvc::SERVICE_START_PENDING, 0) };
+    unsafe { set_service_status(handle, winapi::um::winsvc::SERVICE_RUNNING, 0) };
     let service_thread = std::thread::spawn(move || {
         service_main(rx, tx2, args, false);
     });
     let _e = service_thread.join();
-    set_service_status(handle, winapi::um::winsvc::SERVICE_STOPPED, 0);
+    unsafe { set_service_status(handle, winapi::um::winsvc::SERVICE_STOPPED, 0) };
 }
