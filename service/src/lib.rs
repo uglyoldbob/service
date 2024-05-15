@@ -1,3 +1,7 @@
+#![deny(missing_docs)]
+#![deny(clippy::missing_docs_in_private_items)]
+#![warn(unused_extern_crates)]
+
 //! Contains code for establishing a service
 
 pub use log;
@@ -16,7 +20,37 @@ pub enum LogLevel {
     Error,
 }
 
+#[derive(Debug)]
+/// The events that can be sent to the service handler
+pub enum ServiceEvent<T> {
+    /// Continue a previously paused service
+    Continue,
+    /// Pause the service
+    Pause,
+    /// Stop the service
+    Stop,
+    /// Windows specific session message
+    SessionConnect(Session),
+    /// Windows specific session message
+    SessionDisconnect(Session),
+    /// Windows specific session message
+    SessionRemoteConnect(Session),
+    /// Windows specific session message
+    SessionRemoteDisconnect(Session),
+    /// Windows specific session message
+    SessionLogon(Session),
+    /// Windows specific session message
+    SessionLogoff(Session),
+    /// Windows specific session message
+    SessionLock(Session),
+    /// Windows specific session message
+    SessionUnlock(Session),
+    /// A custom message for the service
+    Custom(T),
+}
+
 impl LogLevel {
+    /// Convert log level to a level filter
     pub fn level_filter(&self) -> log::LevelFilter {
         match self {
             crate::LogLevel::Debug => log::LevelFilter::Debug,
@@ -27,6 +61,7 @@ impl LogLevel {
         }
     }
 
+    /// Convert self to a log::Level
     pub fn level(&self) -> log::Level {
         match self {
             crate::LogLevel::Debug => log::Level::Debug,
@@ -41,14 +76,13 @@ impl LogLevel {
 cfg_if::cfg_if! {
     if #[cfg(windows)] {
         mod windows;
-        pub use self::windows::ServiceConfig as ServiceConfig;
-        pub use self::windows::Service as Service;
+        pub use winapi;
+        pub use self::windows::*;
     } else if #[cfg(target_os = "macos")] {
         todo!();
     } else if #[cfg(target_os = "linux")] {
         mod linux;
-        pub use self::linux::ServiceConfig as ServiceConfig;
-        pub use self::linux::Service as Service;
+        pub use self::linux::*;
     } else {
         todo!();
     }

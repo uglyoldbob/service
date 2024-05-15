@@ -1,0 +1,12 @@
+[package]
+name = "example-service-async"
+version = "0.1.0"
+edition = "2018"
+publish = ["crates-io"]
+
+[dependencies]
+service = { version = "0.1.0", path = "../../service", features = ["async"] }
+
+[dependencies.tokio]
+version = "1.36.0"
+features = ["full"]
