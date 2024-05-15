@@ -53,13 +53,11 @@ lazy_static::lazy_static! {
 pub type DispatchFn =
     extern "system" fn(winapi::shared::minwindef::DWORD, *mut winapi::um::winnt::LPWSTR);
 
-/// The type for the service function. Receives commands from windows to control the actual service.
+/// The type for the service function.
 pub type ServiceFn<T> = fn(
-    rx: std::sync::mpsc::Receiver<crate::ServiceEvent<T>>,
-    tx: std::sync::mpsc::Sender<crate::ServiceEvent<T>>,
-    args: Vec<String>,
-    standalone_mode: bool,
-) -> u32;
+    rx: Option<std::sync::mpsc::Receiver<crate::ServiceEvent<T>>>,
+    tx: Option<std::sync::mpsc::Sender<crate::ServiceEvent<T>>>,
+);
 
 /// The type for the service function. Receives commands from windows to control the actual service. This is the async version of ServiceFn.
 pub type ServiceFnAsync<T> = fn(
@@ -431,13 +429,13 @@ impl Service {
 /// The macro generates the service function required for windows
 #[macro_export]
 macro_rules! ServiceMacro {
-    ($entry:ident, $function:ident) => {
+    ($entry:ident, $function:ident, $t:ident) => {
         extern "system" fn $entry(
             argc: service::winapi::shared::minwindef::DWORD,
             argv: *mut service::winapi::um::winnt::LPWSTR,
         ) {
             let args = unsafe { service::convert_args(argc, argv) };
-            service::run_service($function, args);
+            service::run_service::<$t>($function, args);
         }
     };
 }
@@ -681,7 +679,7 @@ pub fn run_service<T: std::marker::Send + 'static>(service_main: ServiceFn<T>, a
     unsafe { set_service_status(handle, winapi::um::winsvc::SERVICE_START_PENDING, 0) };
     unsafe { set_service_status(handle, winapi::um::winsvc::SERVICE_RUNNING, 0) };
     let service_thread = std::thread::spawn(move || {
-        service_main(rx, tx2, args, false);
+        service_main(Some(rx), Some(tx2));
     });
     let _e = service_thread.join();
     unsafe { set_service_status(handle, winapi::um::winsvc::SERVICE_STOPPED, 0) };

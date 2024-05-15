@@ -2,6 +2,9 @@
 
 use std::path::PathBuf;
 
+/// Dummy function for uniformity to windows
+pub type DispatchFn = fn();
+
 #[derive(Debug)]
 /// Errors that can occur when interfacing with systemctl
 pub enum StartStopError {
@@ -9,6 +12,16 @@ pub enum StartStopError {
     NoSystemCtl,
     /// The systemctl command returned an error
     SystemCtlFailed,
+}
+
+/// The macro generates the service function required for windows
+#[macro_export]
+macro_rules! ServiceMacro {
+    ($entry:ident, $function:ident, $t:ident) => {
+        fn $entry() {
+            $function(None, None);
+        }
+    };
 }
 
 #[derive(Debug)]
@@ -211,5 +224,11 @@ impl Service {
             .await
             .map_err(CreateError::FileIoError)?;
         Ok(self.reload()?)
+    }
+
+    /// Run the required dispatch code for windows
+    pub fn dispatch(&self, service_main: DispatchFn) -> Result<(), u32> {
+        service_main();
+        Ok(())
     }
 }
