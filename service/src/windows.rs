@@ -451,7 +451,7 @@ macro_rules! ServiceAsyncMacro {
         ) {
             let args = unsafe { service::convert_args(argc, argv) };
             let name = args.get(0).unwrap();
-            let (tx, rx) = tokio::sync::mpsc::channel(10);
+            let (tx, mut rx) = tokio::sync::mpsc::channel(10);
             let tx2: tokio::sync::mpsc::Sender<service::ServiceEvent<$t>> = tx.clone();
             let mut tx = Box::new(tx);
             let handle = unsafe {
@@ -480,13 +480,38 @@ macro_rules! ServiceAsyncMacro {
                 .build()
                 .unwrap();
             runtime.block_on(async move {
-                $function(rx, tx2, args, false).await;
+                {
+                    service::log::debug!("The service arguments are {:?}", args);
+                    service::log::debug!("The service env args are {:?}", std::env::args());
+                    let main = tokio::task::spawn(smain());
+                    loop {
+                        tokio::select! {
+                            Some(m) = rx.recv() => {
+                                service::log::debug!("Received message {:?}", m);
+                                if let service::ServiceEvent::Stop = m {
+                                    service::log::debug!("Attempting to stop");
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    main.abort();
+                    0
+                }
             });
             unsafe {
                 service::set_service_status(handle, service::winapi::um::winsvc::SERVICE_STOPPED, 0)
             };
         }
     };
+}
+
+/// This macro is for the async dispatch on a windows service
+#[macro_export]
+macro_rules! DispatchAsync {
+    ($self:ident, $function:ident) => {{
+        $self.dispatch($function)
+    }};
 }
 
 #[cfg(feature = "async")]
@@ -662,7 +687,7 @@ pub unsafe fn set_service_status(
 
 /// Runs the main service function
 pub fn run_service<T: std::marker::Send + 'static>(service_main: ServiceFn<T>, args: Vec<String>) {
-    let name = args.get(0).unwrap();
+    let name = args.first().unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
     let tx2: std::sync::mpsc::Sender<crate::ServiceEvent<T>> = tx.clone();
     let tx = Box::new(tx);

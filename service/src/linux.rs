@@ -14,12 +14,33 @@ pub enum StartStopError {
     SystemCtlFailed,
 }
 
-/// The macro generates the service function required for windows
+/// The macro generates the service function required
 #[macro_export]
 macro_rules! ServiceMacro {
     ($entry:ident, $function:ident, $t:ident) => {
         fn $entry() {
             $function(None, None);
+        }
+    };
+}
+
+/// This macro is for the async dispatch on a linux service
+#[macro_export]
+macro_rules! DispatchAsync {
+    ($self:ident, $function:ident) => {{
+        $function().await;
+        let r: Result<(), u32> = Ok(());
+        r
+    }};
+}
+
+#[cfg(feature = "async")]
+/// The macro generates the service function required
+#[macro_export]
+macro_rules! ServiceAsyncMacro {
+    ($entry:ident, $function:ident, $t:ident) => {
+        async fn $entry() {
+            $function().await;
         }
     };
 }
@@ -226,7 +247,7 @@ impl Service {
         Ok(self.reload()?)
     }
 
-    /// Run the required dispatch code for windows
+    /// Run the required dispatch code
     pub fn dispatch(&self, service_main: DispatchFn) -> Result<(), u32> {
         service_main();
         Ok(())
