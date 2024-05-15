@@ -10,9 +10,9 @@ async fn smain() {
 #[cfg(windows)]
 async fn smain_start(
     mut rx: tokio::sync::mpsc::Receiver<service::ServiceEvent<u64>>,
-    tx: tokio::sync::mpsc::Sender<service::ServiceEvent<u64>>,
+    _tx: tokio::sync::mpsc::Sender<service::ServiceEvent<u64>>,
     args: Vec<String>,
-    standalone_mode: bool,
+    _standalone_mode: bool,
 ) -> u32 {
     service::log::debug!("The service arguments are {:?}", args);
     service::log::debug!("The service env args are {:?}", std::env::args());
@@ -45,7 +45,9 @@ async fn main() {
     let service = service::Service::new("example-service".into());
     service.new_log(service::LogLevel::Debug);
     service::log::debug!("Windows service dispatching now {:?}", std::env::args());
-    service.dispatch(service_starter);
+    if let Err(e) = service.dispatch(service_starter) {
+        service::log::error!("Failed to dispatch service: {:?}", e);
+    }
 }
 
 #[cfg(not(windows))]
