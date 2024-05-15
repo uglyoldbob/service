@@ -454,11 +454,13 @@ macro_rules! ServiceAsyncMacro {
             let mut sh = service::SERVICE_HANDLE.lock().unwrap();
             *sh = service::ServiceStatusHandle::new(handle);
             drop(sh);
-            service::set_service_status(
-                handle,
-                service::winapi::um::winsvc::SERVICE_START_PENDING,
-                0,
-            );
+            unsafe {
+                service::set_service_status(
+                    handle,
+                    service::winapi::um::winsvc::SERVICE_START_PENDING,
+                    0,
+                )
+            };
             unsafe {
                 service::set_service_status(handle, service::winapi::um::winsvc::SERVICE_RUNNING, 0)
             };

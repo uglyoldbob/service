@@ -1,6 +1,29 @@
 use std::path::PathBuf;
 
 #[derive(Debug)]
+pub enum StartStopError {
+    NoSystemCtl,
+    SystemCtlFailed,
+}
+
+#[derive(Debug)]
+pub enum CreateError {
+    NoSystemCtl,
+    SystemCtlFailed,
+    SystemCtlReloadFailed,
+    FileIoError(std::io::Error),
+}
+
+impl From<StartStopError> for CreateError {
+    fn from(value: StartStopError) -> Self {
+        match value {
+            StartStopError::NoSystemCtl => Self::NoSystemCtl,
+            StartStopError::SystemCtlFailed => Self::SystemCtlFailed,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct Session(String);
 
 /// The configuration for constructing a Service.
@@ -73,56 +96,56 @@ impl Service {
     }
 
     /// Stop the service
-    pub fn stop(&mut self) -> Result<(), ()> {
+    pub fn stop(&mut self) -> Result<(), StartStopError> {
         let o = std::process::Command::new("systemctl")
             .arg("stop")
             .arg(&self.name)
             .output()
-            .map_err(|_| ())?;
+            .map_err(|_| StartStopError::NoSystemCtl)?;
         if !o.status.success() {
-            Err(())
+            Err(StartStopError::SystemCtlFailed)
         } else {
             Ok(())
         }
     }
 
     /// Start the service
-    pub fn start(&mut self) -> Result<(), ()> {
+    pub fn start(&mut self) -> Result<(), StartStopError> {
         let o = std::process::Command::new("systemctl")
             .arg("start")
             .arg(&self.name)
             .output()
-            .map_err(|_| ())?;
+            .map_err(|_| StartStopError::NoSystemCtl)?;
         if !o.status.success() {
-            Err(())
+            Err(StartStopError::SystemCtlFailed)
         } else {
             Ok(())
         }
     }
 
     /// Delete the service
-    pub fn delete(&mut self) -> Result<(), ()> {
+    pub fn delete(&mut self) -> Result<(), std::io::Error> {
         let pb = self.systemd_path().join(format!("{}.service", self.name));
         println!("Deleting {}", pb.display());
-        std::fs::remove_file(pb).map_err(|_| ())
+        std::fs::remove_file(pb)
     }
 
     #[cfg(feature = "async")]
     /// Delete the service
-    pub async fn delete_async(&mut self) -> Result<(), ()> {
+    pub async fn delete_async(&mut self) -> Result<(), std::io::Error> {
         let pb = self.systemd_path().join(format!("{}.service", self.name));
         println!("Deleting {}", pb.display());
-        tokio::fs::remove_file(pb).await.map_err(|_| ())
+        tokio::fs::remove_file(pb).await
     }
 
     /// Reload system services if required
-    fn reload(&mut self) -> Result<(), ()> {
+    fn reload(&mut self) -> Result<(), StartStopError> {
         let o = std::process::Command::new("systemctl")
             .arg("daemon-reload")
             .output()
-            .map_err(|_| ())?;
+            .map_err(|_| StartStopError::NoSystemCtl)?;
         if !o.status.success() {
-            Err(())
+            Err(StartStopError::SystemCtlFailed)
         } else {
             Ok(())
         }
@@ -150,26 +173,31 @@ impl Service {
     }
 
     /// Create the service
-    pub fn create(&mut self, config: ServiceConfig) -> Result<(), ()> {
+    pub fn create(&mut self, config: ServiceConfig) -> Result<(), CreateError> {
         use std::io::Write;
         let con = self.build_systemd_file(config);
         let pb = self.systemd_path().join(format!("{}.service", self.name));
         println!("Saving service file as {}", pb.display());
-        let mut fpw = std::fs::File::create(pb).map_err(|_| ())?;
-        fpw.write_all(con.as_bytes()).map_err(|_| ())?;
-        self.reload()
+        let mut fpw = std::fs::File::create(pb).map_err(CreateError::FileIoError)?;
+        fpw.write_all(con.as_bytes())
+            .map_err(CreateError::FileIoError)?;
+        Ok(self.reload()?)
     }
 
     #[cfg(feature = "async")]
     /// Create the service
-    pub async fn create_async(&mut self, config: ServiceConfig) -> Result<(), ()> {
+    pub async fn create_async(&mut self, config: ServiceConfig) -> Result<(), CreateError> {
         use tokio::io::AsyncWriteExt;
 
         let con = self.build_systemd_file(config);
         let pb = self.systemd_path().join(format!("{}.service", self.name));
         println!("Saving service file as {}", pb.display());
-        let mut fpw = tokio::fs::File::create(pb).await.map_err(|_| ())?;
-        fpw.write_all(con.as_bytes()).await.map_err(|_| ())?;
-        self.reload()
+        let mut fpw = tokio::fs::File::create(pb)
+            .await
+            .map_err(CreateError::FileIoError)?;
+        fpw.write_all(con.as_bytes())
+            .await
+            .map_err(CreateError::FileIoError)?;
+        Ok(self.reload()?)
     }
 }
