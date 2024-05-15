@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use std::os::windows::ffi::OsStrExt;
+use std::pin::Pin;
 
 use std::sync::{Arc, Mutex};
 
@@ -441,15 +442,14 @@ macro_rules! ServiceAsyncMacro {
         ) {
             let name = std::env::var("SERVICE_NAME").unwrap();
             let args = service::convert_args(argc, argv);
-            service::log::debug!("The arguments are {:?}", args);
-            service::log::debug!("Env args are {:?}", std::env::args());
-            let (mut tx, rx) = tokio::sync::mpsc::channel(10);
+            let (tx, rx) = tokio::sync::mpsc::channel(10);
             let tx2: tokio::sync::mpsc::Sender<service::ServiceEvent<$t>> = tx.clone();
+            let mut tx = Box::new(tx);
             let handle = unsafe {
                 service::winapi::um::winsvc::RegisterServiceCtrlHandlerExW(
                     service::get_utf16(&name).as_ptr(),
                     Some(service::service_handler_async::<$t>),
-                    &mut tx as *mut _ as service::winapi::shared::minwindef::LPVOID,
+                    Box::into_raw(tx) as service::winapi::shared::minwindef::LPVOID,
                 )
             };
             let mut sh = service::SERVICE_HANDLE.lock().unwrap();
@@ -463,16 +463,12 @@ macro_rules! ServiceAsyncMacro {
             service::set_service_status(handle, service::winapi::um::winsvc::SERVICE_RUNNING, 0);
 
             let runtime = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(1)
                 .enable_all()
                 .build()
                 .unwrap();
-
-            let service_thread = runtime.spawn(async move {
-                service::log::debug!("Running async function now");
+            runtime.block_on(async move {
                 $function(rx, tx2, args, false).await;
             });
-            runtime.block_on(service_thread).unwrap();
             service::set_service_status(handle, service::winapi::um::winsvc::SERVICE_STOPPED, 0);
         }
     };
@@ -484,29 +480,16 @@ pub unsafe extern "system" fn service_handler_async<T>(
     event_data: winapi::shared::minwindef::LPVOID,
     context: winapi::shared::minwindef::LPVOID,
 ) -> winapi::shared::minwindef::DWORD {
-    let tx = context as *mut tokio::sync::mpsc::Sender<crate::ServiceEvent<T>>;
+    let mut tx = context as *mut tokio::sync::mpsc::Sender<crate::ServiceEvent<T>>;
     log::debug!("The command for service handler is {}", control);
     match control {
         winapi::um::winsvc::SERVICE_CONTROL_STOP | winapi::um::winsvc::SERVICE_CONTROL_SHUTDOWN => {
-            log::debug!("Sending stop message");
             use std::ops::DerefMut;
             let mut sh = SERVICE_HANDLE.lock().unwrap();
-            log::debug!("Sending stop message 2");
             let ServiceStatusHandle(h) = sh.deref_mut();
-            log::debug!("Sending stop message 3");
             set_service_status(*h, winapi::um::winsvc::SERVICE_STOP_PENDING, 10);
             drop(sh);
-            log::debug!("Sending stop message 4");
-            let _ = (*tx).blocking_send(crate::ServiceEvent::Stop).unwrap();
-            log::debug!("Sending stop message 5");
-            0
-        }
-        winapi::um::winsvc::SERVICE_CONTROL_PAUSE => {
-            let _ = (*tx).blocking_send(crate::ServiceEvent::Pause);
-            0
-        }
-        winapi::um::winsvc::SERVICE_CONTROL_CONTINUE => {
-            let _ = (*tx).blocking_send(crate::ServiceEvent::Continue);
+            let _ = (*tx).blocking_send(crate::ServiceEvent::Stop);
             0
         }
         winapi::um::winsvc::SERVICE_CONTROL_SESSIONCHANGE => {
@@ -567,17 +550,12 @@ pub unsafe extern "system" fn service_handler<T>(
     log::debug!("The command for service handler is {}", control);
     match control {
         winapi::um::winsvc::SERVICE_CONTROL_STOP | winapi::um::winsvc::SERVICE_CONTROL_SHUTDOWN => {
-            log::debug!("Sending stop message");
             use std::ops::DerefMut;
             let mut sh = SERVICE_HANDLE.lock().unwrap();
-            log::debug!("Sending stop message 2");
             let ServiceStatusHandle(h) = sh.deref_mut();
-            log::debug!("Sending stop message 3");
             set_service_status(*h, winapi::um::winsvc::SERVICE_STOP_PENDING, 10);
             drop(sh);
-            log::debug!("Sending stop message 4");
             let _ = (*tx).send(crate::ServiceEvent::Stop).unwrap();
-            log::debug!("Sending stop message 5");
             0
         }
         winapi::um::winsvc::SERVICE_CONTROL_PAUSE => {
@@ -664,15 +642,14 @@ pub fn run_service<T: std::marker::Send + 'static>(
     argv: *mut winapi::um::winnt::LPWSTR,
 ) {
     let args = convert_args(argc, argv);
-    log::debug!("The arguments are {:?}", args);
-    log::debug!("Env args are {:?}", std::env::args());
     let (mut tx, rx) = std::sync::mpsc::channel();
     let tx2: std::sync::mpsc::Sender<crate::ServiceEvent<T>> = tx.clone();
+    let mut tx = Box::new(tx);
     let handle = unsafe {
         winapi::um::winsvc::RegisterServiceCtrlHandlerExW(
             get_utf16(name).as_ptr(),
             Some(service_handler::<T>),
-            &mut tx as *mut _ as winapi::shared::minwindef::LPVOID,
+            Box::into_raw(tx) as winapi::shared::minwindef::LPVOID,
         )
     };
     let mut sh = SERVICE_HANDLE.lock().unwrap();

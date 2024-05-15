@@ -14,16 +14,25 @@ async fn smain_start(
     args: Vec<String>,
     standalone_mode: bool,
 ) -> u32 {
-    use futures::FutureExt;
-
     service::log::debug!("The service arguments are {:?}", args);
     service::log::debug!("The service env args are {:?}", std::env::args());
+    let main = tokio::task::spawn(smain());
+
     loop {
-        futures::select! {
-            () = smain().fuse() => break,
-            m = rx.recv().fuse() => service::log::debug!("Received message {:?}", m),
+        tokio::select! {
+            Some(m) = rx.recv() => {
+                service::log::debug!("Received message {:?}", m);
+                match m {
+                    service::ServiceEvent::Stop => {
+                        service::log::debug!("Attempting to stop");
+                        break;
+                    }
+                    _ => {}
+                }
+            }
         }
     }
+    main.abort();
     0
 }
 
