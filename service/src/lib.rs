@@ -27,6 +27,12 @@ pub enum LogLevel {
     Error,
 }
 
+impl Default for LogLevel {
+    fn default() -> Self {
+        Self::Info
+    }
+}
+
 #[derive(Debug)]
 /// The events that can be sent to the service handler
 pub enum ServiceEvent<T> {
