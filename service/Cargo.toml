@@ -10,8 +10,8 @@ cfg-if = "1.0.0"
 log = "0.4.21"
 serde = {version = "1.0.198", features = ["serde_derive"], optional = true }
 
-[dependencies.prompt]
-git = "https://github.com/uglyoldbob/prompt.git"
+[dependencies.userprompt]
+version = "0.0.1"
 optional = true
 
 [dependencies.tokio]
@@ -30,6 +30,6 @@ winapi = {version = "0.3.9", features = ["errhandlingapi", "winsvc", "winuser"]}
 
 [features]
 async = [ "dep:tokio" ]
-prompt = [ "dep:prompt" ]
-egui-prompt = [ "dep:prompt", "prompt/egui" ]
+prompt = [ "dep:userprompt" ]
+egui-prompt = [ "dep:userprompt", "userprompt/egui" ]
 serde = [ "dep:serde" ]
