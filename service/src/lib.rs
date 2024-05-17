@@ -6,8 +6,14 @@
 
 pub use log;
 
+#[cfg(feature = "egui-prompt")]
+use prompt::egui;
+
 /// The various levels of log, increasing in severity
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "prompt", derive(prompt::Prompting))]
+#[cfg_attr(feature = "egui-prompt", derive(prompt::EguiPrompting))]
 pub enum LogLevel {
     /// Trace
     Trace,
