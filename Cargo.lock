@@ -431,6 +431,7 @@ dependencies = [
  "eventlog",
  "lazy_static",
  "log",
+ "serde",
  "simple_logger",
  "tokio",
  "widestring",

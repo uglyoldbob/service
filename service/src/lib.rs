@@ -7,6 +7,7 @@
 pub use log;
 
 /// The various levels of log, increasing in severity
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum LogLevel {
     /// Trace
     Trace,
