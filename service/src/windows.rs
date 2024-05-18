@@ -474,22 +474,17 @@ macro_rules! ServiceAsyncMacro {
             unsafe {
                 service::set_service_status(handle, service::winapi::um::winsvc::SERVICE_RUNNING, 0)
             };
-
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .unwrap();
             runtime.block_on(async move {
                 {
-                    service::log::debug!("The service arguments are {:?}", args);
-                    service::log::debug!("The service env args are {:?}", std::env::args());
                     let main = tokio::task::spawn(smain());
                     loop {
                         tokio::select! {
                             Some(m) = rx.recv() => {
-                                service::log::debug!("Received message {:?}", m);
                                 if let service::ServiceEvent::Stop = m {
-                                    service::log::debug!("Attempting to stop");
                                     break;
                                 }
                             }
@@ -514,68 +509,64 @@ macro_rules! DispatchAsync {
     }};
 }
 
-#[cfg(feature = "async")]
-/// The service handler for async code. This receives commands from windows to control the service being run.
-/// # Safety
-///
-/// context must be a valid `std::sync::mpsc::Sender<crate::ServiceEvent<T>>`, defined in `RegisterServiceCtrlHandlerExW``
-pub unsafe extern "system" fn service_handler_async<T>(
-    control: winapi::shared::minwindef::DWORD,
+#[tokio::main]
+async fn do_the_thing<T>(tx: &mut tokio::sync::mpsc::Sender<crate::ServiceEvent<T>>) {
+    tx.send(crate::ServiceEvent::Stop).await;
+}
+
+fn do_service_handle<T>(
+    mut tx: Box<tokio::sync::mpsc::Sender<crate::ServiceEvent<T>>>, 
+    control: DWORD,
     event_type: winapi::shared::minwindef::DWORD,
-    event_data: winapi::shared::minwindef::LPVOID,
-    context: winapi::shared::minwindef::LPVOID,
-) -> winapi::shared::minwindef::DWORD {
-    let tx = context as *mut tokio::sync::mpsc::Sender<crate::ServiceEvent<T>>;
-    log::debug!("The command for service handler is {}", control);
+    session_id: Option<u32>,
+) -> DWORD {
     match control {
         winapi::um::winsvc::SERVICE_CONTROL_STOP | winapi::um::winsvc::SERVICE_CONTROL_SHUTDOWN => {
             use std::ops::DerefMut;
             let mut sh = SERVICE_HANDLE.lock().unwrap();
             let ServiceStatusHandle(h) = sh.deref_mut();
-            set_service_status(*h, winapi::um::winsvc::SERVICE_STOP_PENDING, 10);
+            unsafe { set_service_status(*h, winapi::um::winsvc::SERVICE_STOP_PENDING, 10) };
             drop(sh);
-            let _ = (*tx).blocking_send(crate::ServiceEvent::Stop);
+            do_the_thing(&mut tx);
+            //let _ = (*tx).blocking_send(crate::ServiceEvent::Stop);
             0
         }
         winapi::um::winsvc::SERVICE_CONTROL_SESSIONCHANGE => {
             let event = event_type;
-            let session_notification =
-                event_data as *const winapi::um::winuser::WTSSESSION_NOTIFICATION;
-            let session_id = (*session_notification).dwSessionId;
-            let session = Session(session_id);
+            let session = Session(session_id.unwrap());
 
             match event as usize {
                 winapi::um::winuser::WTS_CONSOLE_CONNECT => {
-                    let _ = (*tx).blocking_send(crate::ServiceEvent::SessionConnect(session));
+                    let _ = tx.blocking_send(crate::ServiceEvent::SessionConnect(session));
                     0
                 }
                 winapi::um::winuser::WTS_CONSOLE_DISCONNECT => {
-                    let _ = (*tx).blocking_send(crate::ServiceEvent::SessionDisconnect(session));
+                    let _ = tx.blocking_send(crate::ServiceEvent::SessionDisconnect(session));
                     0
                 }
                 winapi::um::winuser::WTS_REMOTE_CONNECT => {
-                    let _ = (*tx).blocking_send(crate::ServiceEvent::SessionRemoteConnect(session));
+                    let _ = tx.blocking_send(crate::ServiceEvent::SessionRemoteConnect(session));
                     0
                 }
                 winapi::um::winuser::WTS_REMOTE_DISCONNECT => {
                     let _ =
-                        (*tx).blocking_send(crate::ServiceEvent::SessionRemoteDisconnect(session));
+                        tx.blocking_send(crate::ServiceEvent::SessionRemoteDisconnect(session));
                     0
                 }
                 winapi::um::winuser::WTS_SESSION_LOGON => {
-                    let _ = (*tx).blocking_send(crate::ServiceEvent::SessionLogon(session));
+                    let _ = tx.blocking_send(crate::ServiceEvent::SessionLogon(session));
                     0
                 }
                 winapi::um::winuser::WTS_SESSION_LOGOFF => {
-                    let _ = (*tx).blocking_send(crate::ServiceEvent::SessionLogoff(session));
+                    let _ = tx.blocking_send(crate::ServiceEvent::SessionLogoff(session));
                     0
                 }
                 winapi::um::winuser::WTS_SESSION_LOCK => {
-                    let _ = (*tx).blocking_send(crate::ServiceEvent::SessionLock(session));
+                    let _ = tx.blocking_send(crate::ServiceEvent::SessionLock(session));
                     0
                 }
                 winapi::um::winuser::WTS_SESSION_UNLOCK => {
-                    let _ = (*tx).blocking_send(crate::ServiceEvent::SessionUnlock(session));
+                    let _ = tx.blocking_send(crate::ServiceEvent::SessionUnlock(session));
                     0
                 }
                 _ => 0,
@@ -583,6 +574,30 @@ pub unsafe extern "system" fn service_handler_async<T>(
         }
         _ => winapi::shared::winerror::ERROR_CALL_NOT_IMPLEMENTED,
     }
+}
+
+#[cfg(feature = "async")]
+/// The service handler for async code. This receives commands from windows to control the service being run.
+/// # Safety
+///
+/// context must be a valid `std::sync::mpsc::Sender<crate::ServiceEvent<T>>`, defined in `RegisterServiceCtrlHandlerExW``
+pub unsafe extern "system" fn service_handler_async<T: Send + 'static>(
+    control: winapi::shared::minwindef::DWORD,
+    event_type: winapi::shared::minwindef::DWORD,
+    event_data: winapi::shared::minwindef::LPVOID,
+    context: winapi::shared::minwindef::LPVOID,
+) -> winapi::shared::minwindef::DWORD {
+    let tx = context as *mut tokio::sync::mpsc::Sender<crate::ServiceEvent<T>>;
+    let tx = Box::from_raw(tx);
+    let session_notification =
+        event_data as *const winapi::um::winuser::WTSSESSION_NOTIFICATION;
+    let session_id = 
+    if let winapi::um::winsvc::SERVICE_CONTROL_SESSIONCHANGE = event_type {
+        Some(unsafe { (*session_notification).dwSessionId })
+    } else { None };
+    std::thread::spawn(move || {
+        do_service_handle(tx, control, event_type, session_id)
+    }).join().unwrap()
 }
 
 /// Run the service handler for a windows service, handling commands from windows to control the service
@@ -596,7 +611,6 @@ pub unsafe extern "system" fn service_handler<T>(
     context: winapi::shared::minwindef::LPVOID,
 ) -> winapi::shared::minwindef::DWORD {
     let tx = context as *mut std::sync::mpsc::Sender<crate::ServiceEvent<T>>;
-    log::debug!("The command for service handler is {}", control);
     match control {
         winapi::um::winsvc::SERVICE_CONTROL_STOP | winapi::um::winsvc::SERVICE_CONTROL_SHUTDOWN => {
             use std::ops::DerefMut;

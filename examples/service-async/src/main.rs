@@ -11,6 +11,14 @@ service::ServiceAsyncMacro!(service_starter, smain, u64);
 
 #[tokio::main]
 async fn main() {
+    #[cfg(target_family = "windows")]
+    {
+        std::panic::set_hook(Box::new(|p| {
+            service::log::debug!("Panic {:?}", p);
+            service::log::error!("Backtrace3: {:?}", std::backtrace::Backtrace::capture());
+        }))
+    }
+
     let service = service::Service::new("example-service".into());
     service.new_log(service::LogLevel::Debug);
     service::log::debug!("Service dispatching now {:?}", std::env::args());
