@@ -5,4 +5,4 @@ edition = "2018"
 publish = ["crates-io"]
 
 [dependencies]
-service = { version = "0.1.1", path = "../../service" }
+service = { version = "0.2.0", path = "../../service" }
