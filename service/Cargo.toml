@@ -1,8 +1,8 @@
 [package]
 name = "service"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
-description = "A library for managin services in a cross platform manner."
+description = "A library for managing services in a cross platform manner."
 license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -28,7 +28,7 @@ simple_logger = "4.3.3"
 eventlog = "0.2.2"
 lazy_static = "1.4.0"
 widestring = "1.1.0"
-winapi = {version = "0.3.9", features = ["errhandlingapi", "winsvc", "winuser"]}
+winapi = {version = "0.3.9", features = ["errhandlingapi", "winsvc", "winerror", "winuser"]}
 
 [features]
 async = [ "dep:tokio" ]
