@@ -96,6 +96,9 @@ cfg_if::cfg_if! {
     } else if #[cfg(target_os = "linux")] {
         mod linux;
         pub use self::linux::*;
+    } else if #[cfg(target_os = "android")] {
+        mod android;
+        pub use self::android::*;
     } else {
         todo!();
     }
