@@ -124,8 +124,7 @@ impl Service {
 
     /// Initialize a new log instance
     pub fn new_log(&self, level: super::LogLevel) {
-        simple_logger::SimpleLogger::new().init().unwrap();
-        log::set_max_level(level.level_filter());
+        simple_logger::SimpleLogger::new().with_level(level.level_filter()).init().unwrap();
     }
 
     /// The systemd path for linux
